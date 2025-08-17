@@ -6,8 +6,6 @@ import os
 from typing import Callable, Optional
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from loguru import logger
@@ -20,7 +18,7 @@ class TelegramWorkerBot:
 	def __init__(self, settings: Settings, state: WorkerState):
 		self.settings = settings
 		self.state = state
-		self.bot = Bot(token=settings.telegram_token, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
+		self.bot = Bot(token=settings.telegram_token)
 		self.dp = Dispatcher()
 
 		self.dp.message.register(self.cmd_start, Command(commands=["start"]))
@@ -66,7 +64,7 @@ class TelegramWorkerBot:
 			return
 		intro_lines = [
 			"ربات معامله‌گر LBank Spot (فقط حالت زنده)",
-			"لطفاً کلیدهای API با مجوز *Trade + Read* بسازید و *Withdrawals* را در صرافی *غیرفعال* نگه دارید.",
+			"لطفاً کلیدهای API با مجوز Trade + Read بسازید و Withdrawals را در صرافی غیرفعال نگه دارید.",
 			"",
 			f"- نماد: {self.settings.symbol}",
 			f"- تایم‌فریم: {self.settings.timeframe}",
