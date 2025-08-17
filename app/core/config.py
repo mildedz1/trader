@@ -19,22 +19,16 @@ class Settings(BaseModel):
 
 	# Trading common
 	symbol: str = Field(default="ETH/USDT", alias="SYMBOL")
-	timeframe: str = Field(default="1h", alias="TIMEFRAME")
-	strategy_id: str = Field(default="ema_rsi", alias="STRATEGY_ID")  # ema_rsi | bb_breakout
+	timeframe: str = Field(default="30m", alias="TIMEFRAME")
 
-	# EMA/RSI strategy params
+	# macd_zero_trend params
 	ema_fast: int = Field(default=50, alias="EMA_FAST")
 	ema_slow: int = Field(default=200, alias="EMA_SLOW")
-	rsi_period: int = Field(default=14, alias="RSI_PERIOD")
-	rsi_entry: float = Field(default=30, alias="RSI_ENTRY")
-	rsi_exit: float = Field(default=70, alias="RSI_EXIT")
-
-	# BB breakout params
-	bb_period: int = Field(default=20, alias="BB_PERIOD")
-	bb_std: float = Field(default=2.0, alias="BB_STD")
-	bb_bw_lookback: int = Field(default=200, alias="BB_BW_LOOKBACK")
-	bb_bw_pctl: float = Field(default=20.0, alias="BB_BW_PCTL")
-	rsi_confirm: float = Field(default=50.0, alias="RSI_CONFIRM")
+	macd_fast: int = Field(default=12, alias="MACD_FAST")
+	macd_slow: int = Field(default=26, alias="MACD_SLOW")
+	macd_signal: int = Field(default=9, alias="MACD_SIGNAL")
+	rsi_confirm: bool = Field(default=False, alias="RSI_CONFIRM")
+	rsi_confirm_level: float = Field(default=45.0, alias="RSI_CONFIRM_LEVEL")
 
 	# Risk & loop
 	tick_interval_sec: float = Field(default=15.0, alias="TICK_INTERVAL_SEC")
@@ -42,7 +36,7 @@ class Settings(BaseModel):
 	risk_position_size: float = Field(default=1.0, alias="RISK_POSITION_SIZE")  # USDT
 	max_daily_loss_pct: float = Field(default=3.0, alias="MAX_DAILY_LOSS_PCT")
 	reset_hour_utc: int = Field(default=0, alias="RESET_HOUR_UTC")
-	cooldown_candles_after_exit: int = Field(default=0, alias="COOLDOWN_CANDLES_AFTER_EXIT")
+	cooldown_candles_after_exit: int = Field(default=1, alias="COOLDOWN_CANDLES_AFTER_EXIT")
 
 	# Mode (live-only)
 	mode: str = Field(default="live", alias="MODE")
@@ -74,14 +68,6 @@ class Settings(BaseModel):
 	def validate_mode(cls, v: str):
 		if v != "live":
 			raise ValueError("Only live mode is supported (no demo/paper)")
-		return v
-
-	@field_validator("strategy_id")
-	@classmethod
-	def validate_strategy_id(cls, v: str):
-		allowed = {"ema_rsi", "bb_breakout"}
-		if v not in allowed:
-			raise ValueError(f"STRATEGY_ID must be one of {allowed}")
 		return v
 
 	@classmethod

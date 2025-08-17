@@ -1,4 +1,4 @@
-from app.strategy.indicators import ema, rsi, crossed_up, bollinger_bands, bb_bandwidth, percentile
+from app.strategy.indicators import ema, rsi, macd
 
 
 def test_ema_basic():
@@ -16,18 +16,9 @@ def test_rsi_bounds():
 	assert 0 <= res[-1] <= 100
 
 
-def test_crossed_up():
-	series = [25, 29, 31]
-	assert crossed_up(series, 30) is True
-	series = [35, 29, 29.5]
-	assert crossed_up(series, 30) is False
-
-
-def test_bollinger_helpers():
-	closes = [i for i in range(1, 250)]
-	upper, basis, lower = bollinger_bands(closes, 20, 2.0)
-	bw = bb_bandwidth(upper, basis, lower)
-	assert len(upper) == len(closes)
-	assert len(bw) == len(closes)
-	p20 = percentile(bw[-200:], 20)
-	assert p20 >= 0
+def test_macd_smoke():
+	values = [i for i in range(1, 300)]
+	m, s, h = macd(values, 12, 26, 9)
+	assert len(m) == len(values)
+	assert len(s) == len(values)
+	assert len(h) == len(values)

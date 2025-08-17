@@ -68,10 +68,11 @@ class TelegramWorkerBot:
 			"",
 			f"• نماد: {self.settings.symbol}",
 			f"• تایم‌فریم: {self.settings.timeframe}",
-			f"• استراتژی: {self.settings.strategy_id}",
-			f"• ریسک: مقدار ثابت {self.settings.risk_position_size} USDT (سقف 1 USDT هر سفارش)",
-			f"• EMA: {self.settings.ema_fast}/{self.settings.ema_slow} | RSI: {self.settings.rsi_period} (Entry={self.settings.rsi_entry}, Exit={self.settings.rsi_exit})",
-			f"• Bollinger: period={self.settings.bb_period}, std={self.settings.bb_std}, bw_pctl={self.settings.bb_bw_pctl}, rsi_confirm={self.settings.rsi_confirm}",
+			"• استراتژی: macd_zero_trend",
+			f"• ریسک: {self.settings.risk_position_size} USDT (سقف هر سفارش 1 USDT)",
+			f"• Trend EMA: {self.settings.ema_fast}/{self.settings.ema_slow}",
+			f"• MACD: fast={self.settings.macd_fast}, slow={self.settings.macd_slow}, signal={self.settings.macd_signal}",
+			f"• RSI Confirm: {'فعال' if self.settings.rsi_confirm else 'غیرفعال'} (سطح={self.settings.rsi_confirm_level})",
 			f"• حد باخت روزانه: {self.settings.max_daily_loss_pct}% | ریست (UTC): {self.settings.reset_hour_utc}",
 		]
 		await message.answer("\n".join(intro_lines), reply_markup=self.main_menu())
@@ -91,7 +92,7 @@ class TelegramWorkerBot:
 		lines = [
 			"📊 وضعیت کارگر",
 			f"• توقف: {paused}{cooldown}",
-			f"• استراتژی: {self.state.last_strategy_id or self.settings.strategy_id}",
+			"• استراتژی: macd_zero_trend",
 			f"• آخرین کندل: {self.state.last_candle_ts or '-'}",
 			"",
 			"پوزیشن:",
@@ -103,33 +104,18 @@ class TelegramWorkerBot:
 			f"  - تصمیم ورود (BUY): {self.state.last_decision_long}",
 			f"  - تصمیم خروج (SELL): {self.state.last_decision_exit}",
 		]
-		# Show key metrics nicely
 		metrics = self.state.last_metrics or {}
-		if self.state.last_strategy_id == "ema_rsi" or (not self.state.last_strategy_id and self.settings.strategy_id == "ema_rsi"):
-			ema_fast = metrics.get("ema_fast")
-			ema_slow = metrics.get("ema_slow")
-			rsi = metrics.get("rsi")
-			if ema_fast is not None and ema_slow is not None and rsi is not None:
-				lines += [
-					f"  - EMA_fast/slow: {self._fmt_float(ema_fast,2)} / {self._fmt_float(ema_slow,2)}",
-					f"  - RSI: {self._fmt_float(rsi,2)}",
-				]
-		else:
-			bb_bw = metrics.get("bb_bw")
-			bb_th = metrics.get("bb_bw_thresh")
-			rsi = metrics.get("rsi")
-			upper = metrics.get("upper")
-			basis = metrics.get("basis")
-			lower = metrics.get("lower")
-			vals = []
-			if bb_bw is not None and bb_th is not None:
-				vals.append(f"  - BB BW: {self._fmt_float(bb_bw,4)} (pctl {self._fmt_float(bb_th,4)})")
-			if rsi is not None:
-				vals.append(f"  - RSI: {self._fmt_float(rsi,2)}")
-			if upper is not None and basis is not None and lower is not None:
-				vals.append(f"  - BB bands: U={self._fmt_float(upper,2)} M={self._fmt_float(basis,2)} L={self._fmt_float(lower,2)}")
-			if vals:
-				lines += vals
+		ema_fast = metrics.get("ema_fast")
+		ema_slow = metrics.get("ema_slow")
+		h_prev = metrics.get("macd_hist_prev")
+		h_now = metrics.get("macd_hist_now")
+		vals = []
+		if ema_fast is not None and ema_slow is not None:
+			vals.append(f"  - EMA_fast/slow: {self._fmt_float(ema_fast,2)} / {self._fmt_float(ema_slow,2)}")
+		if h_prev is not None and h_now is not None:
+			vals.append(f"  - MACD Hist: prev={self._fmt_float(h_prev,4)} now={self._fmt_float(h_now,4)}")
+		if vals:
+			lines += vals
 		lines += ["", f"سود/زیان روزانه: {self._fmt_float(self.state.daily_pnl,4)} USDT"]
 		return "\n".join(lines)
 
@@ -189,7 +175,7 @@ class TelegramWorkerBot:
 			try:
 				payload = json.loads(parts[1])
 				self.settings.persist_overrides(payload)
-				await message.answer("تنظیمات به‌روزرسانی و ذخیره شد. برای تغییر استراتژی: ابتدا /pause سپس /config و در پایان /resume.", reply_markup=self.main_menu())
+				await message.answer("تنظیمات به‌روزرسانی و ذخیره شد.", reply_markup=self.main_menu())
 				return
 			except Exception as exc:  # noqa: BLE001
 				await message.answer(f"فرمت JSON نامعتبر است: {exc}", reply_markup=self.main_menu())
@@ -197,29 +183,23 @@ class TelegramWorkerBot:
 		cfg = {
 			"SYMBOL": self.settings.symbol,
 			"TIMEFRAME": self.settings.timeframe,
-			"STRATEGY_ID": self.settings.strategy_id,
-			"RISK_POSITION_MODE": self.settings.risk_position_mode,
+			"EMA_FAST": self.settings.ema_fast,
+			"EMA_SLOW": self.settings.ema_slow,
+			"MACD_FAST": self.settings.macd_fast,
+			"MACD_SLOW": self.settings.macd_slow,
+			"MACD_SIGNAL": self.settings.macd_signal,
+			"RSI_CONFIRM": self.settings.rsi_confirm,
+			"RSI_CONFIRM_LEVEL": self.settings.rsi_confirm_level,
 			"RISK_POSITION_SIZE": self.settings.risk_position_size,
 			"MAX_DAILY_LOSS_PCT": self.settings.max_daily_loss_pct,
 			"RESET_HOUR_UTC": self.settings.reset_hour_utc,
-			"EMA_FAST": self.settings.ema_fast,
-			"EMA_SLOW": self.settings.ema_slow,
-			"RSI_PERIOD": self.settings.rsi_period,
-			"RSI_ENTRY": self.settings.rsi_entry,
-			"RSI_EXIT": self.settings.rsi_exit,
-			"BB_PERIOD": self.settings.bb_period,
-			"BB_STD": self.settings.bb_std,
-			"BB_BW_LOOKBACK": self.settings.bb_bw_lookback,
-			"BB_BW_PCTL": self.settings.bb_bw_pctl,
-			"RSI_CONFIRM": self.settings.rsi_confirm,
 		}
 		help_text = """به‌روزرسانی تنظیمات:
 /config {JSON}
 
 نمونه:
-/config {\"STRATEGY_ID\":\"bb_breakout\",\"RISK_POSITION_SIZE\":1,\"SYMBOL\":\"ETH/USDT\"}
-
-توجه: برای تغییر استراتژی، بهتر است ابتدا ربات را متوقف (/pause) و سپس پس از تغییر، ادامه دهید (/resume)."""
+/config {\"TIMEFRAME\":\"30m\",\"EMA_FAST\":50,\"EMA_SLOW\":200,\"MACD_FAST\":12,\"MACD_SLOW\":26,\"MACD_SIGNAL\":9,\"RSI_CONFIRM\":true,\"RSI_CONFIRM_LEVEL\":45}
+"""
 		await message.answer(help_text, reply_markup=self.main_menu())
 		await message.answer("تنظیمات فعلی (JSON):\n" + json.dumps(cfg, indent=2), reply_markup=self.main_menu())
 

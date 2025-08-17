@@ -52,64 +52,13 @@ def rsi(values: Iterable[float], period: int) -> List[float]:
 	return rsi_values
 
 
-def crossed_up(series: List[float], threshold: float) -> bool:
-	if len(series) < 2:
-		return False
-	return series[-2] < threshold and series[-1] >= threshold
-
-
-def sma(values: List[float], period: int) -> List[float]:
-	if period <= 0:
-		raise ValueError("SMA period must be > 0")
-	res: List[float] = []
-	for i in range(len(values)):
-		if i + 1 < period:
-			res.append(0.0)
-			continue
-		window = values[i + 1 - period : i + 1]
-		res.append(sum(window) / period)
-	return res
-
-
-def stddev(values: List[float], period: int) -> List[float]:
-	if period <= 0:
-		raise ValueError("STD period must be > 0")
-	res: List[float] = []
-	for i in range(len(values)):
-		if i + 1 < period:
-			res.append(0.0)
-			continue
-		window = values[i + 1 - period : i + 1]
-		mean = sum(window) / period
-		var = sum((x - mean) ** 2 for x in window) / period
-		res.append(var ** 0.5)
-	return res
-
-
-def bollinger_bands(closes: List[float], period: int, std_mult: float) -> Tuple[List[float], List[float], List[float]]:
-	basis = sma(closes, period)
-	sd = stddev(closes, period)
-	upper: List[float] = []
-	lower: List[float] = []
-	for i in range(len(closes)):
-		upper.append(basis[i] + std_mult * sd[i])
-		lower.append(basis[i] - std_mult * sd[i])
-	return upper, basis, lower
-
-
-def bb_bandwidth(upper: List[float], basis: List[float], lower: List[float]) -> List[float]:
-	bw: List[float] = []
-	for u, b, l in zip(upper, basis, lower):
-		if b == 0:
-			bw.append(0.0)
-		else:
-			bw.append((u - l) / b)
-	return bw
-
-
-def percentile(values: List[float], p: float) -> float:
-	if not values:
-		return 0.0
-	vals = sorted(values)
-	k = max(0, min(len(vals) - 1, int(round((p / 100.0) * (len(vals) - 1)))))
-	return vals[k]
+def macd(values: Iterable[float], fast: int, slow: int, signal: int) -> Tuple[List[float], List[float], List[float]]:
+	closes = list(values)
+	if fast <= 0 or slow <= 0 or signal <= 0:
+		raise ValueError("MACD periods must be > 0")
+	ema_fast = ema(closes, fast)
+	ema_slow = ema(closes, slow)
+	macd_line = [f - s for f, s in zip(ema_fast, ema_slow)]
+	signal_line = ema(macd_line, signal)
+	hist = [m - s for m, s in zip(macd_line, signal_line)]
+	return macd_line, signal_line, hist

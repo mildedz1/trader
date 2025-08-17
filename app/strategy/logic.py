@@ -11,7 +11,7 @@ from loguru import logger
 from ..core.config import Settings
 from ..core.state import WorkerState
 from ..exchange_adapter.base import ExchangeAdapter
-from .indicators import ema, rsi, crossed_up, bollinger_bands, bb_bandwidth, percentile
+from .indicators import ema, rsi, macd
 
 
 @dataclass
@@ -21,50 +21,30 @@ class StrategyResult:
 	extra: Dict[str, float]
 
 
-def evaluate_ema_rsi(closes: List[float], settings: Settings) -> StrategyResult:
+def evaluate_macd_zero_trend(closes: List[float], settings: Settings) -> StrategyResult:
 	ema_fast_series = ema(closes, settings.ema_fast)
 	ema_slow_series = ema(closes, settings.ema_slow)
-	rsi_series = rsi(closes, settings.rsi_period)
-
-	last_ema_fast = ema_fast_series[-1]
-	last_ema_slow = ema_slow_series[-1]
-	last_rsi = rsi_series[-1]
-	trend_ok = last_ema_fast > last_ema_slow
-	entry_cross = rsi_series[-2] < settings.rsi_entry and rsi_series[-1] >= settings.rsi_entry
-	should_long = trend_ok and entry_cross
-	should_exit = last_rsi >= settings.rsi_exit or not trend_ok
-	return StrategyResult(should_long, should_exit, {
-		"ema_fast": last_ema_fast,
-		"ema_slow": last_ema_slow,
-		"rsi": last_rsi,
-	})
-
-
-def evaluate_bb_breakout(closes: List[float], settings: Settings) -> StrategyResult:
-	upper, basis, lower = bollinger_bands(closes, settings.bb_period, settings.bb_std)
-	bw = bb_bandwidth(upper, basis, lower)
-	lookback = min(len(bw), settings.bb_bw_lookback)
-	bw_tail = [x for x in bw[-lookback:] if x > 0]
-	bw_thresh = percentile(bw_tail, settings.bb_bw_pctl) if bw_tail else 0.0
-	is_squeeze = bw[-1] <= bw_thresh if bw_tail else False
-	rsi_series = rsi(closes, settings.rsi_period)
-	cross_up = closes[-2] <= upper[-2] and closes[-1] > upper[-1]
-	should_long = bool(is_squeeze and cross_up and rsi_series[-1] >= settings.rsi_confirm)
-	should_exit = bool((closes[-1] < basis[-1]) or (rsi_series[-1] < 40))
-	return StrategyResult(should_long, should_exit, {
-		"bb_bw": bw[-1] if bw else 0.0,
-		"bb_bw_thresh": bw_thresh,
-		"rsi": rsi_series[-1] if rsi_series else 0.0,
-		"upper": upper[-1] if upper else 0.0,
-		"basis": basis[-1] if basis else 0.0,
-		"lower": lower[-1] if lower else 0.0,
-	})
-
-
-def select_strategy(closes: List[float], settings: Settings) -> StrategyResult:
-	if settings.strategy_id == "bb_breakout":
-		return evaluate_bb_breakout(closes, settings)
-	return evaluate_ema_rsi(closes, settings)
+	macd_line, signal_line, hist = macd(closes, settings.macd_fast, settings.macd_slow, settings.macd_signal)
+	trend_ok = ema_fast_series[-1] > ema_slow_series[-1]
+	# zero-cross up/down on histogram
+	h_prev, h_now = (hist[-2], hist[-1]) if len(hist) >= 2 else (0.0, 0.0)
+	zero_up = (h_prev <= 0) and (h_now > 0)
+	zero_down = (h_prev >= 0) and (h_now < 0)
+	should_long = trend_ok and zero_up
+	if settings.rsi_confirm:
+		rsi_series = rsi(closes, 14)
+		should_long = should_long and (rsi_series[-1] >= settings.rsi_confirm_level)
+	should_exit = (zero_down) or (not trend_ok)
+	return StrategyResult(
+		should_long=bool(should_long),
+		should_exit=bool(should_exit),
+		extra={
+			"ema_fast": ema_fast_series[-1],
+			"ema_slow": ema_slow_series[-1],
+			"macd_hist_prev": h_prev,
+			"macd_hist_now": h_now,
+		},
+	)
 
 
 async def compute_position_size_usdt_capped(adapter: ExchangeAdapter, settings: Settings, price: float) -> Tuple[float, float]:
@@ -82,13 +62,13 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 		if state.last_action_candle_ts is not None and candle_ts <= state.last_action_candle_ts:
 			return {"status": "waiting_candle"}
 
-	res = select_strategy(closes, settings)
-	state.last_strategy_id = settings.strategy_id
+	res = evaluate_macd_zero_trend(closes, settings)
+	state.last_strategy_id = "macd_zero_trend"
 	state.last_metrics = res.extra
 	state.last_decision_long = bool(res.should_long)
 	state.last_decision_exit = bool(res.should_exit)
 	state.last_candle_ts = candle_ts
-	state.last_signal = f"{settings.strategy_id} | {res.extra} | long={res.should_long} exit={res.should_exit}"
+	state.last_signal = f"macd_zero_trend | {res.extra} | long={res.should_long} exit={res.should_exit}"
 
 	state.heartbeat(settings.heartbeat_path)
 
@@ -97,7 +77,8 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 
 	bal = await adapter.fetch_balance()
 	quote = float((bal.get("total") or {}).get("USDT", 0.0))
-	base = float((bal.get("total") or {}).get(settings.symbol.split("/")[0], 0.0))
+	base_ccy = settings.symbol.split("/")[0]
+	base = float((bal.get("total") or {}).get(base_ccy, 0.0))
 	ticker = await adapter.fetch_ticker(settings.symbol)
 	price = float(ticker.get("last") or ticker.get("close") or 0.0)
 	current_equity = quote + base * price
@@ -117,11 +98,9 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 		state.cooldown_candles_remaining -= 1
 		return {"status": "cooldown", "remaining": state.cooldown_candles_remaining}
 
-	base_ccy = settings.symbol.split("/")[0]
 	if state.position.is_long:
 		if res.should_exit:
-			amount_base = state.position.quantity
-			amount_base = min(amount_base, base)
+			amount_base = min(state.position.quantity, base)
 			if amount_base <= 0:
 				state.position.reset()
 				return {"status": "flat_reset"}

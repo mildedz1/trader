@@ -1,5 +1,5 @@
 from app.core.config import Settings
-from app.strategy.logic import evaluate_ema_rsi, evaluate_bb_breakout
+from app.strategy.logic import evaluate_macd_zero_trend
 
 
 def base_settings():
@@ -7,22 +7,14 @@ def base_settings():
 		"TELEGRAM_TOKEN": "x",
 		"ALLOWED_CHAT_IDS": "1",
 		"SYMBOL": "ETH/USDT",
-		"TIMEFRAME": "1h",
+		"TIMEFRAME": "30m",
 		"MODE": "live",
 	})
 
 
-def test_ema_rsi_runs():
+def test_macd_zero_trend_runs():
 	settings = base_settings()
 	closes = [i for i in range(1, 300)]
-	res = evaluate_ema_rsi(closes, settings)
-	assert isinstance(res.should_long, bool)
-	assert isinstance(res.should_exit, bool)
-
-
-def test_bb_breakout_runs():
-	settings = base_settings()
-	closes = [i for i in range(1, 300)]
-	res = evaluate_bb_breakout(closes, settings)
+	res = evaluate_macd_zero_trend(closes, settings)
 	assert isinstance(res.should_long, bool)
 	assert isinstance(res.should_exit, bool)
