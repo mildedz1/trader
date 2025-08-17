@@ -83,6 +83,11 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 			return {"status": "waiting_candle"}
 
 	res = select_strategy(closes, settings)
+	state.last_strategy_id = settings.strategy_id
+	state.last_metrics = res.extra
+	state.last_decision_long = bool(res.should_long)
+	state.last_decision_exit = bool(res.should_exit)
+	state.last_candle_ts = candle_ts
 	state.last_signal = f"{settings.strategy_id} | {res.extra} | long={res.should_long} exit={res.should_exit}"
 
 	state.heartbeat(settings.heartbeat_path)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional, Dict
 
 
 @dataclass
@@ -27,6 +27,13 @@ class WorkerState:
 	daily_pnl: float = 0.0
 	last_reset_day: Optional[int] = None
 	last_heartbeat_ts: float = 0.0
+
+	# Strategy context for status rendering
+	last_strategy_id: Optional[str] = None
+	last_metrics: Dict[str, float] = field(default_factory=dict)
+	last_decision_long: bool = False
+	last_decision_exit: bool = False
+	last_candle_ts: Optional[int] = None  # ms
 
 	# Debounce / Cooldown / Lock
 	last_action_candle_ts: Optional[int] = None

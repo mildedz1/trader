@@ -63,18 +63,21 @@ class TelegramWorkerBot:
 		if not self.is_allowed(message):
 			return
 		intro_lines = [
-			"ربات معامله‌گر LBank Spot (فقط حالت زنده)",
-			"لطفاً کلیدهای API با مجوز Trade + Read بسازید و Withdrawals را در صرافی غیرفعال نگه دارید.",
+			"🤖 ربات معامله‌گر LBank Spot (فقط حالت زنده)",
+			"کلید API با مجوز Trade + Read بسازید و Withdrawals را غیرفعال نگه دارید.",
 			"",
-			f"- نماد: {self.settings.symbol}",
-			f"- تایم‌فریم: {self.settings.timeframe}",
-			f"- استراتژی: {self.settings.strategy_id}",
-			f"- ریسک: مقدار ثابت {self.settings.risk_position_size} USDT (سقف سخت 1 USDT هر سفارش)",
-			f"- EMA: {self.settings.ema_fast}/{self.settings.ema_slow} | RSI: {self.settings.rsi_period} ورودی={self.settings.rsi_entry} خروج={self.settings.rsi_exit}",
-			f"- Bollinger: دوره={self.settings.bb_period} انحراف={self.settings.bb_std} پهنای‌باند pctl={self.settings.bb_bw_pctl} RSI تایید={self.settings.rsi_confirm}",
-			f"- حداکثر باخت روزانه: {self.settings.max_daily_loss_pct}% | ساعت ریست (UTC): {self.settings.reset_hour_utc}",
+			f"• نماد: {self.settings.symbol}",
+			f"• تایم‌فریم: {self.settings.timeframe}",
+			f"• استراتژی: {self.settings.strategy_id}",
+			f"• ریسک: مقدار ثابت {self.settings.risk_position_size} USDT (سقف 1 USDT هر سفارش)",
+			f"• EMA: {self.settings.ema_fast}/{self.settings.ema_slow} | RSI: {self.settings.rsi_period} (Entry={self.settings.rsi_entry}, Exit={self.settings.rsi_exit})",
+			f"• Bollinger: period={self.settings.bb_period}, std={self.settings.bb_std}, bw_pctl={self.settings.bb_bw_pctl}, rsi_confirm={self.settings.rsi_confirm}",
+			f"• حد باخت روزانه: {self.settings.max_daily_loss_pct}% | ریست (UTC): {self.settings.reset_hour_utc}",
 		]
 		await message.answer("\n".join(intro_lines), reply_markup=self.main_menu())
+
+	def _fmt_float(self, v: float, n: int) -> str:
+		return f"{v:.{n}f}"
 
 	async def cmd_status(self, message: Message) -> None:
 		if not self.is_allowed(message):
@@ -83,15 +86,52 @@ class TelegramWorkerBot:
 
 	async def _build_status_text(self) -> str:
 		pos = self.state.position
-		status_lines = [
-			f"وضعیت توقف: {'بله' if self.state.is_paused else 'خیر'}",
-			f"آخرین سیگنال: {self.state.last_signal}",
-			f"پوزیشن: لانگ={pos.is_long} | مقدار={pos.quantity:.6f} | ورود={pos.entry_price:.4f}",
-			f"سود/زیان روزانه: {self.state.daily_pnl:.4f} USDT",
+		paused = "بله" if self.state.is_paused else "خیر"
+		cooldown = f" (Cooldown: {self.state.cooldown_candles_remaining})" if self.state.cooldown_candles_remaining > 0 else ""
+		lines = [
+			"📊 وضعیت کارگر",
+			f"• توقف: {paused}{cooldown}",
+			f"• استراتژی: {self.state.last_strategy_id or self.settings.strategy_id}",
+			f"• آخرین کندل: {self.state.last_candle_ts or '-'}",
+			"",
+			"پوزیشن:",
+			f"  - لانگ: {pos.is_long}",
+			f"  - مقدار: {self._fmt_float(pos.quantity, 6)} {self.settings.symbol.split('/')[0]}",
+			f"  - قیمت ورود: {self._fmt_float(pos.entry_price, 4)}",
+			"",
+			"سیگنال اخیر:",
+			f"  - تصمیم ورود (BUY): {self.state.last_decision_long}",
+			f"  - تصمیم خروج (SELL): {self.state.last_decision_exit}",
 		]
-		if self.state.cooldown_candles_remaining > 0:
-			status_lines.append(f"Cooldown: {self.state.cooldown_candles_remaining} کندل باقی‌مانده")
-		return "\n".join(status_lines)
+		# Show key metrics nicely
+		metrics = self.state.last_metrics or {}
+		if self.state.last_strategy_id == "ema_rsi" or (not self.state.last_strategy_id and self.settings.strategy_id == "ema_rsi"):
+			ema_fast = metrics.get("ema_fast")
+			ema_slow = metrics.get("ema_slow")
+			rsi = metrics.get("rsi")
+			if ema_fast is not None and ema_slow is not None and rsi is not None:
+				lines += [
+					f"  - EMA_fast/slow: {self._fmt_float(ema_fast,2)} / {self._fmt_float(ema_slow,2)}",
+					f"  - RSI: {self._fmt_float(rsi,2)}",
+				]
+		else:
+			bb_bw = metrics.get("bb_bw")
+			bb_th = metrics.get("bb_bw_thresh")
+			rsi = metrics.get("rsi")
+			upper = metrics.get("upper")
+			basis = metrics.get("basis")
+			lower = metrics.get("lower")
+			vals = []
+			if bb_bw is not None and bb_th is not None:
+				vals.append(f"  - BB BW: {self._fmt_float(bb_bw,4)} (pctl {self._fmt_float(bb_th,4)})")
+			if rsi is not None:
+				vals.append(f"  - RSI: {self._fmt_float(rsi,2)}")
+			if upper is not None and basis is not None and lower is not None:
+				vals.append(f"  - BB bands: U={self._fmt_float(upper,2)} M={self._fmt_float(basis,2)} L={self._fmt_float(lower,2)}")
+			if vals:
+				lines += vals
+		lines += ["", f"سود/زیان روزانه: {self._fmt_float(self.state.daily_pnl,4)} USDT"]
+		return "\n".join(lines)
 
 	async def _send_balance(self, chat_id: int) -> None:
 		if self.state.balance_provider is None:
