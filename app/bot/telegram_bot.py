@@ -160,6 +160,25 @@ class TelegramWorkerBot:
 			if self.settings.rsi_confirm:
 				lines.append(f"  - RSI ≥ {self.settings.rsi_confirm_level}: {'بله' if (rsi_now is not None and rsi_now >= self.settings.rsi_confirm_level) else 'خیر'}")
 			lines.append(f"  => نتیجه: {'آماده ورود' if entry_ok else 'ورود غیرفعال'}")
+		else:
+			# Futures: show both long and short readiness
+			allow_long = bool(metrics.get("allow_long", 0.0))
+			allow_short = bool(metrics.get("allow_short", 0.0))
+			zero_up = bool(metrics.get("zero_up", 0.0))
+			zero_down = bool(metrics.get("zero_down", 0.0))
+			long_trigger = bool(metrics.get("long_trigger", 0.0))
+			short_trigger = bool(metrics.get("short_trigger", 0.0))
+			lines += [
+				"",
+				"آمادگی جهت:",
+				f"  - لانگ مجاز: {'بله' if allow_long else 'خیر'}",
+				f"  - شورت مجاز: {'بله' if allow_short else 'خیر'}",
+				"تریگرها:",
+				f"  - MACD zero-up (لانگ): {'بله' if zero_up else 'خیر'}",
+				f"  - MACD zero-down (شورت): {'بله' if zero_down else 'خیر'}",
+				f"  - تریگر لانگ: {'بله' if long_trigger else 'خیر'}",
+				f"  - تریگر شورت: {'بله' if short_trigger else 'خیر'}",
+			]
 		lines += ["", f"سود/زیان روزانه: {self._fmt_float(self.state.daily_pnl,4)} USDT"]
 		return "\n".join(lines)
 

@@ -95,8 +95,15 @@ async def run_tick_futures(adapter: ExchangeAdapter, state: WorkerState, fstate:
 		"ema_slow": ema_slow_series[-1],
 		"st_dir": float(st_dir),
 		"st_line": st_line[-1],
+		"price": price,
+		"allow_long": 1.0 if allow_long else 0.0,
+		"allow_short": 1.0 if allow_short else 0.0,
 		"macd_hist_prev": h_prev,
 		"macd_hist_now": h_now,
+		"zero_up": 1.0 if zero_up else 0.0,
+		"zero_down": 1.0 if zero_down else 0.0,
+		"long_trigger": 1.0 if long_trigger else 0.0,
+		"short_trigger": 1.0 if short_trigger else 0.0,
 	}
 	state.last_decision_long = long_trigger
 	state.last_decision_exit = short_trigger if fstate.position.is_long else long_trigger if fstate.position.is_short else False
