@@ -137,6 +137,10 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 				order = await adapter.create_market_sell_order(settings.symbol, amount_to_sell)
 				state.position.reset()
 				logger.info(f"Exit long: {order}")
+				if state.notify:
+					base_ccy = settings.symbol.split("/")[0]
+					notional_usdt = amount_to_sell * price
+					await state.notify(f"فروش انجام شد: {amount_to_sell:.6f} {base_ccy} @ {price:.4f} ≈ {notional_usdt:.2f} USDT")
 				if candle_ts is not None:
 					state.last_action_candle_ts = candle_ts
 				state.cooldown_candles_remaining = max(0, int(settings.cooldown_candles_after_exit))
@@ -174,6 +178,9 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 				state.position.entry_price = price
 				state.position.quantity = amount_base_cap
 				logger.info(f"Enter long: {order}")
+				if state.notify:
+					base_ccy = settings.symbol.split("/")[0]
+					await state.notify(f"خرید انجام شد: {amount_base_cap:.6f} {base_ccy} @ {price:.4f} ≈ {amount_quote_cap:.2f} USDT")
 				if candle_ts is not None:
 					state.last_action_candle_ts = candle_ts
 				return {"status": "bought", "order": order, "signal": state.last_signal}
