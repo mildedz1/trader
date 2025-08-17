@@ -33,16 +33,23 @@ class Settings(BaseModel):
 
 	# Futures trading (futures_supertrend_macd)
 	futures_symbol: str = Field(default="ETH/USDT", alias="FUTURES_SYMBOL")
-	futures_timeframe: str = Field(default="15m", alias="FUTURES_TIMEFRAME")
+	futures_timeframe: str = Field(default="5m", alias="FUTURES_TIMEFRAME")
 	futures_leverage: int = Field(default=5, alias="FUTURES_LEVERAGE")
 	futures_position_mode: str = Field(default="isolated", alias="FUTURES_POSITION_MODE")  # isolated|cross
 	futures_max_positions: int = Field(default=1, alias="FUTURES_MAX_POSITIONS")
 	futures_allow_short: bool = Field(default=True, alias="FUTURES_ALLOW_SHORT")
 	futures_testnet: bool = Field(default=False, alias="FUTURES_TESTNET")
 	st_supertrend_atr_period: int = Field(default=10, alias="ST_SUPERTREND_ATR_PERIOD")
-	st_supertrend_atr_mult: float = Field(default=3.0, alias="ST_SUPERTREND_ATR_MULT")
-	sl_atr_mult: float = Field(default=1.5, alias="SL_ATR_MULT")
-	tp_rr: float = Field(default=2.0, alias="TP_RR")
+	st_supertrend_atr_mult: float = Field(default=2.5, alias="ST_SUPERTREND_ATR_MULT")
+	ema_fast: int = Field(default=20, alias="EMA_FAST")
+	ema_slow: int = Field(default=50, alias="EMA_SLOW")
+	sl_atr_mult: float = Field(default=1.0, alias="SL_ATR_MULT")
+	tp_rr: float = Field(default=1.2, alias="TP_RR")
+	trail_enable: bool = Field(default=True, alias="TRAIL_ENABLE")
+	trail_atr_mult: float = Field(default=0.8, alias="TRAIL_ATR_MULT")
+	cooldown_candles_after_exit: int = Field(default=1, alias="COOLDOWN_CANDLES")
+	max_trades_per_day: int = Field(default=50, alias="MAX_TRADES_PER_DAY")
+	min_seconds_between_trades: int = Field(default=30, alias="MIN_SECONDS_BETWEEN_TRADES")
 	use_full_balance: bool = Field(default=True, alias="USE_FULL_BALANCE")
 
 	# Risk & loop
