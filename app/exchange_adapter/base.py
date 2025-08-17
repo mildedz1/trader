@@ -19,6 +19,9 @@ class ExchangeAdapter:
 	async def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
 		raise NotImplementedError
 
+	async def fetch_open_orders(self, symbol: str) -> List[Dict[str, Any]]:
+		raise NotImplementedError
+
 	async def create_market_buy_order(self, symbol: str, amount_quote: float) -> Dict[str, Any]:
 		raise NotImplementedError
 

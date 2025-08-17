@@ -70,9 +70,21 @@ class Worker:
 				f"- قیمت ورود: {self.state.position.entry_price:.4f}",
 				f"- قیمت فعلی: {price:.4f}",
 				f"- PnL تقریبی: {pnl:.4f} USDT",
-				"",
-				"برای بستن دستی از دکمه 'ورود دستی (BUY)' استفاده نکنید؛ در صورت نیاز، دکمه بستن دستی اضافه می‌شود.",
 			]
+			# Also list open orders on the symbol (if any)
+			try:
+				orders = await self.adapter.fetch_open_orders(self.settings.symbol)
+				if orders:
+					lines.append("")
+					lines.append("سفارش‌های باز:")
+					for o in orders[:10]:
+						side = o.get("side", "?")
+						type_ = o.get("type", "?")
+						amt = o.get("amount") or o.get("remaining") or 0
+						price_o = o.get("price") or 0
+						lines.append(f"- {side.upper()} {type_} amount={amt} price={price_o}")
+			except Exception:
+				pass
 			return "\n".join(lines)
 
 		async def check_signal() -> str:

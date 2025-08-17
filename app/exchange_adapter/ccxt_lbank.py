@@ -35,6 +35,13 @@ class CcxtLBankAdapter(ExchangeAdapter):
 	async def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
 		return await self.exchange.fetch_ticker(symbol)
 
+	async def fetch_open_orders(self, symbol: str) -> List[Dict[str, Any]]:
+		try:
+			orders = await self.exchange.fetch_open_orders(symbol)
+			return orders or []
+		except Exception:
+			return []
+
 	async def create_market_buy_order(self, symbol: str, amount_quote: float) -> Dict[str, Any]:
 		ticker = await self.fetch_ticker(symbol)
 		price = float(ticker.get("last") or ticker.get("close"))

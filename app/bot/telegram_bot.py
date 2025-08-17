@@ -54,6 +54,9 @@ class TelegramWorkerBot:
 			],
 			[
 				InlineKeyboardButton(text="ورود دستی (BUY)", callback_data="menu:manual_buy"),
+				InlineKeyboardButton(text="بستن دستی (SELL)", callback_data="menu:manual_close"),
+			],
+			[
 				InlineKeyboardButton(text="توقف", callback_data="menu:pause"),
 			],
 			[
@@ -175,6 +178,11 @@ class TelegramWorkerBot:
 		elif action == "manual_buy":
 			if self.state.manual_buy:
 				text = await self.state.manual_buy()
+				await self.bot.send_message(chat_id, text)
+			await cq.answer()
+		elif action == "manual_close":
+			if self.state.manual_close:
+				text = await self.state.manual_close()
 				await self.bot.send_message(chat_id, text)
 			await cq.answer()
 		elif action == "pause":
