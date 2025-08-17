@@ -1,0 +1,98 @@
+from __future__ import annotations
+
+import json
+import os
+from typing import List, Optional
+
+from pydantic import BaseModel, Field, ValidationError, field_validator
+
+
+class Settings(BaseModel):
+	# Telegram
+	telegram_token: str = Field(alias="TELEGRAM_TOKEN")
+	allowed_chat_ids: List[int] = Field(alias="ALLOWED_CHAT_IDS")
+
+	# Exchange/keys
+	exchange_id: str = Field(default="lbank", alias="EXCHANGE_ID")
+	lbank_api_key: Optional[str] = Field(default=None, alias="LBANK_API_KEY")
+	lbank_api_secret: Optional[str] = Field(default=None, alias="LBANK_API_SECRET")
+
+	# Trading
+	symbol: str = Field(default="BTC/USDT", alias="SYMBOL")
+	timeframe: str = Field(default="1h", alias="TIMEFRAME")
+	ema_fast: int = Field(default=50, alias="EMA_FAST")
+	ema_slow: int = Field(default=200, alias="EMA_SLOW")
+	rsi_period: int = Field(default=14, alias="RSI_PERIOD")
+	rsi_entry: float = Field(default=30, alias="RSI_ENTRY")
+	rsi_exit: float = Field(default=70, alias="RSI_EXIT")
+	tick_interval_sec: float = Field(default=15.0, alias="TICK_INTERVAL_SEC")
+	risk_position_mode: str = Field(default="percent_of_balance", alias="RISK_POSITION_MODE")
+	risk_position_size: float = Field(default=0.01, alias="RISK_POSITION_SIZE")
+	max_daily_loss_pct: float = Field(default=3.0, alias="MAX_DAILY_LOSS_PCT")
+	reset_hour_utc: int = Field(default=0, alias="RESET_HOUR_UTC")
+	mode: str = Field(default="demo", alias="MODE")  # "demo" or "live"
+
+	# Persistence & logs
+	config_path: str = Field(default="/data/config.json", alias="CONFIG_PATH")
+	log_path: str = Field(default="/data/logs/worker.log", alias="LOG_PATH")
+	heartbeat_path: str = Field(default="/data/heartbeat", alias="HEARTBEAT_PATH")
+
+	@field_validator("allowed_chat_ids", mode="before")
+	@classmethod
+	def parse_chat_ids(cls, v: str | list[int]):
+		if isinstance(v, list):
+			return v
+		if not isinstance(v, str) or not v.strip():
+			raise ValueError("ALLOWED_CHAT_IDS is required and must be comma-separated integers")
+		return [int(x.strip()) for x in v.split(",") if x.strip()]
+
+	@field_validator("risk_position_mode")
+	@classmethod
+	def validate_risk_mode(cls, v: str):
+		allowed = {"percent_of_balance", "fixed_amount"}
+		if v not in allowed:
+			raise ValueError(f"RISK_POSITION_MODE must be one of {allowed}")
+		return v
+
+	@field_validator("mode")
+	@classmethod
+	def validate_mode(cls, v: str):
+		allowed = {"demo", "live"}
+		if v not in allowed:
+			raise ValueError(f"MODE must be one of {allowed}")
+		return v
+
+	@classmethod
+	def load(cls) -> "Settings":
+		data = {k: v for k, v in os.environ.items()}
+		# Allow persisted overrides if present
+		config_path = data.get("CONFIG_PATH", "/data/config.json")
+		if os.path.exists(config_path):
+			try:
+				with open(config_path, "r", encoding="utf-8") as f:
+					persisted = json.load(f)
+				# persisted values override env
+				data.update({k: str(v) if not isinstance(v, str) else v for k, v in persisted.items()})
+			except Exception:
+				pass
+		try:
+			return cls.model_validate(data)
+		except ValidationError as e:
+			raise SystemExit(f"Configuration error: {e}") from e
+
+	def persist_overrides(self, overrides: dict) -> None:
+		# Update only known fields
+		allowed_keys = {f.alias for f in self.model_fields.values()}
+		filtered = {k: v for k, v in overrides.items() if k in allowed_keys}
+		os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
+		try:
+			if os.path.exists(self.config_path):
+				with open(self.config_path, "r", encoding="utf-8") as f:
+					existing = json.load(f)
+			else:
+				existing = {}
+			existing.update(filtered)
+			with open(self.config_path, "w", encoding="utf-8") as f:
+				json.dump(existing, f, indent=2)
+		except Exception as exc:  # noqa: BLE001
+			raise RuntimeError(f"Failed to persist config: {exc}") from exc
