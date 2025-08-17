@@ -49,15 +49,18 @@ class TelegramWorkerBot:
 				InlineKeyboardButton(text="موجودی کیف پول", callback_data="menu:balance"),
 			],
 			[
-				InlineKeyboardButton(text="توقف", callback_data="menu:pause"),
-				InlineKeyboardButton(text="ادامه", callback_data="menu:resume"),
-			],
-			[
+				InlineKeyboardButton(text="سفارشات/پوزیشن", callback_data="menu:positions"),
 				InlineKeyboardButton(text="چک سیگنال", callback_data="menu:check_signal"),
-				InlineKeyboardButton(text="ورود دستی (BUY)", callback_data="menu:manual_buy"),
 			],
 			[
+				InlineKeyboardButton(text="ورود دستی (BUY)", callback_data="menu:manual_buy"),
+				InlineKeyboardButton(text="توقف", callback_data="menu:pause"),
+			],
+			[
+				InlineKeyboardButton(text="ادامه", callback_data="menu:resume"),
 				InlineKeyboardButton(text="لاگ‌ها", callback_data="menu:logs"),
+			],
+			[
 				InlineKeyboardButton(text="تنظیمات", callback_data="menu:config"),
 			],
 		]
@@ -159,6 +162,11 @@ class TelegramWorkerBot:
 		elif action == "balance":
 			await self._send_balance(chat_id)
 			await cq.answer("موجودی به‌روزرسانی شد.")
+		elif action == "positions":
+			if self.state.position_overview:
+				text = await self.state.position_overview()
+				await self.bot.send_message(chat_id, text)
+			await cq.answer()
 		elif action == "check_signal":
 			if self.state.check_signal:
 				text = await self.state.check_signal()

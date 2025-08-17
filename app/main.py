@@ -52,6 +52,29 @@ class Worker:
 
 		self.state.balance_provider = balance_provider
 
+		async def position_overview() -> str:
+			base_ccy, quote_ccy = self.settings.symbol.split("/")
+			bal = await self.adapter.fetch_balance()
+			free = bal.get("free") or bal.get("total") or {}
+			base = float(free.get(base_ccy, 0.0))
+			usdt = float(free.get(quote_ccy, 0.0))
+			ticker = await self.adapter.fetch_ticker(self.settings.symbol)
+			price = float(ticker.get("last") or ticker.get("close") or 0.0)
+			pnl = 0.0
+			if self.state.position.is_long and self.state.position.quantity > 0 and self.state.position.entry_price > 0:
+				pnl = (price - self.state.position.entry_price) * self.state.position.quantity
+			lines = [
+				"سفارش/پوزیشن فعلی:",
+				f"- لانگ: {self.state.position.is_long}",
+				f"- مقدار: {self.state.position.quantity:.6f} {base_ccy}",
+				f"- قیمت ورود: {self.state.position.entry_price:.4f}",
+				f"- قیمت فعلی: {price:.4f}",
+				f"- PnL تقریبی: {pnl:.4f} USDT",
+				"",
+				"برای بستن دستی از دکمه 'ورود دستی (BUY)' استفاده نکنید؛ در صورت نیاز، دکمه بستن دستی اضافه می‌شود.",
+			]
+			return "\n".join(lines)
+
 		async def check_signal() -> str:
 			# Fetch latest required data and evaluate once
 			required_n = max(200, int(self.settings.ema_slow) + 1, int(self.settings.macd_slow) + int(self.settings.macd_signal) + 1)
@@ -101,6 +124,7 @@ class Worker:
 		self.state.check_signal = check_signal
 		self.state.manual_buy = manual_buy
 		self.state.manual_close = manual_close
+		self.state.position_overview = position_overview
 
 	async def fetch_ohlcv(self, limit: int = 300):
 		client = ccxt.lbank({"enableRateLimit": True})

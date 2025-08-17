@@ -45,6 +45,7 @@ class WorkerState:
 
 	# Balance provider for bot UI
 	balance_provider: Optional[Callable[[], Awaitable[str]]] = None
+	position_overview: Optional[Callable[[], Awaitable[str]]] = None
 
 	# Manual actions (wired at startup)
 	manual_buy: Optional[Callable[[], Awaitable[str]]] = None
