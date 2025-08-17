@@ -31,19 +31,27 @@ def evaluate_macd_zero_trend(closes: List[float], settings: Settings) -> Strateg
 	zero_up = (h_prev <= 0) and (h_now > 0)
 	zero_down = (h_prev >= 0) and (h_now < 0)
 	should_long = trend_ok and zero_up
+	rsi_now = None
 	if settings.rsi_confirm:
 		rsi_series = rsi(closes, 14)
-		should_long = should_long and (rsi_series[-1] >= settings.rsi_confirm_level)
+		rsi_now = rsi_series[-1]
+		should_long = should_long and (rsi_now >= settings.rsi_confirm_level)
 	should_exit = (zero_down) or (not trend_ok)
+	extra: Dict[str, float] = {
+		"ema_fast": ema_fast_series[-1],
+		"ema_slow": ema_slow_series[-1],
+		"macd_hist_prev": h_prev,
+		"macd_hist_now": h_now,
+		"trend_ok": 1.0 if trend_ok else 0.0,
+		"zero_up": 1.0 if zero_up else 0.0,
+		"zero_down": 1.0 if zero_down else 0.0,
+	}
+	if rsi_now is not None:
+		extra["rsi_now"] = float(rsi_now)
 	return StrategyResult(
 		should_long=bool(should_long),
 		should_exit=bool(should_exit),
-		extra={
-			"ema_fast": ema_fast_series[-1],
-			"ema_slow": ema_slow_series[-1],
-			"macd_hist_prev": h_prev,
-			"macd_hist_now": h_now,
-		},
+		extra=extra,
 	)
 
 

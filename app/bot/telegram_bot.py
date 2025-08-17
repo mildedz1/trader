@@ -109,6 +109,10 @@ class TelegramWorkerBot:
 		ema_slow = metrics.get("ema_slow")
 		h_prev = metrics.get("macd_hist_prev")
 		h_now = metrics.get("macd_hist_now")
+		trend_ok = bool(metrics.get("trend_ok", 0.0))
+		zero_up = bool(metrics.get("zero_up", 0.0))
+		zero_down = bool(metrics.get("zero_down", 0.0))
+		rsi_now = metrics.get("rsi_now")
 		vals = []
 		if ema_fast is not None and ema_slow is not None:
 			vals.append(f"  - EMA_fast/slow: {self._fmt_float(ema_fast,2)} / {self._fmt_float(ema_slow,2)}")
@@ -116,6 +120,17 @@ class TelegramWorkerBot:
 			vals.append(f"  - MACD Hist: prev={self._fmt_float(h_prev,4)} now={self._fmt_float(h_now,4)}")
 		if vals:
 			lines += vals
+		# Entry condition summary
+		entry_ok = trend_ok and zero_up and (True if not self.settings.rsi_confirm else (rsi_now is not None and rsi_now >= self.settings.rsi_confirm_level))
+		lines += [
+			"",
+			"شرایط ورود (BUY):",
+			f"  - روند (EMA50>EMA200): {'بله' if trend_ok else 'خیر'}",
+			f"  - MACD zero-cross up: {'بله' if zero_up else 'خیر'}",
+		]
+		if self.settings.rsi_confirm:
+			lines.append(f"  - RSI ≥ {self.settings.rsi_confirm_level}: {'بله' if (rsi_now is not None and rsi_now >= self.settings.rsi_confirm_level) else 'خیر'}")
+		lines.append(f"  => نتیجه: {'آماده ورود' if entry_ok else 'ورود غیرفعال'}")
 		lines += ["", f"سود/زیان روزانه: {self._fmt_float(self.state.daily_pnl,4)} USDT"]
 		return "\n".join(lines)
 
