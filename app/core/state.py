@@ -27,6 +27,7 @@ class WorkerState:
 	daily_pnl: float = 0.0
 	last_reset_day: Optional[int] = None
 	last_heartbeat_ts: float = 0.0
+	last_price: float = 0.0
 
 	# Strategy context for status rendering
 	last_strategy_id: Optional[str] = None

@@ -77,6 +77,11 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 	state.last_decision_exit = bool(res.should_exit)
 	state.last_candle_ts = candle_ts
 	state.last_signal = f"macd_zero_trend | {res.extra} | long={res.should_long} exit={res.should_exit}"
+	# Cache last price from closes
+	try:
+		state.last_price = float(closes[-1])
+	except Exception:
+		pass
 
 	state.heartbeat(settings.heartbeat_path)
 
@@ -87,8 +92,11 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 	quote = float((bal.get("total") or {}).get("USDT", 0.0))
 	base_ccy = settings.symbol.split("/")[0]
 	base = float((bal.get("total") or {}).get(base_ccy, 0.0))
-	ticker = await adapter.fetch_ticker(settings.symbol)
-	price = float(ticker.get("last") or ticker.get("close") or 0.0)
+	try:
+		ticker = await adapter.fetch_ticker(settings.symbol)
+		price = float(ticker.get("last") or ticker.get("close") or 0.0)
+	except Exception:
+		price = float(state.last_price or 0.0)
 	current_equity = quote + base * price
 	if state.should_reset_day(settings.reset_hour_utc) or state.equity_start_of_day <= 0:
 		state.reset_day(current_equity)
