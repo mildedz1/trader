@@ -10,6 +10,7 @@ from .core.config import Settings
 from .core.logging import setup_logging
 from .core.state import WorkerState
 from .exchange_adapter.ccxt_lbank import CcxtLBankAdapter
+from .exchange_adapter.lbank_futures import CcxtLBankFuturesAdapter
 from .strategy.logic import run_tick
 import ccxt.async_support as ccxt  # keep import for runtime
 
@@ -25,7 +26,11 @@ class Worker:
 		logger.info("Use LBank API keys with Trade+Read only and Withdrawals disabled.")
 		if not self.settings.lbank_api_key or not self.settings.lbank_api_secret:
 			raise SystemExit("LBANK_API_KEY and LBANK_API_SECRET are required (live-only mode)")
-		self.adapter = CcxtLBankAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
+		# Choose adapter
+		if self.settings.trade_mode == "futures":
+			self.adapter = CcxtLBankFuturesAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
+		else:
+			self.adapter = CcxtLBankAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
 		await self.adapter.connect()
 		logger.info("Connected to exchange adapter")
 
@@ -171,10 +176,11 @@ class Worker:
 		self.state.position_overview = position_overview
 
 	async def fetch_ohlcv(self, limit: int = 300):
-		client = ccxt.lbank({"enableRateLimit": True})
+		client = ccxt.lbank({"enableRateLimit": True, "options": {"defaultType": "swap" if self.settings.trade_mode == "futures" else "spot"}})
 		try:
 			await client.load_markets()
-			ohlcv = await client.fetch_ohlcv(self.settings.symbol, timeframe=self.settings.timeframe, limit=limit)
+			sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
+			ohlcv = await client.fetch_ohlcv(sym, timeframe=(self.settings.futures_timeframe if self.settings.trade_mode == "futures" else self.settings.timeframe), limit=limit)
 			return ohlcv
 		finally:
 			try:
