@@ -7,6 +7,7 @@ from typing import Callable, Optional
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from loguru import logger
@@ -19,7 +20,7 @@ class TelegramWorkerBot:
 	def __init__(self, settings: Settings, state: WorkerState):
 		self.settings = settings
 		self.state = state
-		self.bot = Bot(token=settings.telegram_token, parse_mode=ParseMode.MARKDOWN)
+		self.bot = Bot(token=settings.telegram_token, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
 		self.dp = Dispatcher()
 
 		self.dp.message.register(self.cmd_start, Command(commands=["start"]))
