@@ -29,6 +29,29 @@ class Worker:
 		await self.adapter.connect()
 		logger.info("Connected to exchange adapter")
 
+		async def balance_provider() -> str:
+			bal = await self.adapter.fetch_balance()
+			free = bal.get("free") or bal.get("total") or {}
+			base_ccy, quote_ccy = self.settings.symbol.split("/")
+			base = float(free.get(base_ccy, 0.0))
+			usdt = float(free.get(quote_ccy, 0.0))
+			ticker = await self.adapter.fetch_ticker(self.settings.symbol)
+			price = float(ticker.get("last") or ticker.get("close") or 0.0)
+			equity = usdt + base * price
+			ready_buy = usdt >= 1.0
+			ready_sell = base * price >= 0.01  # arbitrary tiny threshold
+			lines = [
+				f"موجودی {quote_ccy}: {usdt:.4f}",
+				f"موجودی {base_ccy}: {base:.8f}",
+				f"قیمت {self.settings.symbol}: {price:.4f}",
+				f"اکویتی تقریبی: {equity:.4f} USDT",
+				f"آمادگی خرید (≤ 1 USDT): {'بله' if ready_buy else 'خیر'}",
+				f"آمادگی فروش (≤ 1 USDT معادل): {'بله' if ready_sell else 'خیر'}",
+			]
+			return "\n".join(lines)
+
+		self.state.balance_provider = balance_provider
+
 	async def fetch_ohlcv(self, limit: int = 300):
 		client = ccxt.lbank({"enableRateLimit": True})
 		try:

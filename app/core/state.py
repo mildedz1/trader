@@ -36,6 +36,9 @@ class WorkerState:
 	# Notifier (set by bot)
 	notify: Optional[Callable[[str], Awaitable[None]]] = None
 
+	# Balance provider for bot UI
+	balance_provider: Optional[Callable[[], Awaitable[str]]] = None
+
 	def heartbeat(self, heartbeat_path: str) -> None:
 		self.last_heartbeat_ts = time.time()
 		os.makedirs(os.path.dirname(heartbeat_path), exist_ok=True)
