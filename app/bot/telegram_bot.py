@@ -72,19 +72,28 @@ class TelegramWorkerBot:
 	async def cmd_start(self, message: Message) -> None:
 		if not self.is_allowed(message):
 			return
+		mode_badge = "[FUTURES]" if self.settings.trade_mode == "futures" else "[SPOT]"
+		sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
+		tf = self.settings.futures_timeframe if self.settings.trade_mode == "futures" else self.settings.timeframe
 		intro_lines = [
-			"🤖 ربات معامله‌گر LBank Spot (فقط حالت زنده)",
+			f"🤖 ربات معامله‌گر LBank {mode_badge}",
 			"کلید API با مجوز Trade + Read بسازید و Withdrawals را غیرفعال نگه دارید.",
 			"",
-			f"• نماد: {self.settings.symbol}",
-			f"• تایم‌فریم: {self.settings.timeframe}",
-			"• استراتژی: macd_zero_trend",
-			f"• ریسک: {self.settings.risk_position_size} USDT (سقف هر سفارش 1 USDT)",
-			f"• Trend EMA: {self.settings.ema_fast}/{self.settings.ema_slow}",
-			f"• MACD: fast={self.settings.macd_fast}, slow={self.settings.macd_slow}, signal={self.settings.macd_signal}",
-			f"• RSI Confirm: {'فعال' if self.settings.rsi_confirm else 'غیرفعال'} (سطح={self.settings.rsi_confirm_level})",
-			f"• حد باخت روزانه: {self.settings.max_daily_loss_pct}% | ریست (UTC): {self.settings.reset_hour_utc}",
+			f"• حالت: {self.settings.trade_mode}",
+			f"• نماد: {sym}",
+			f"• تایم‌فریم: {tf}",
 		]
+		if self.settings.trade_mode == "futures":
+			intro_lines += [
+				"• استراتژی: futures_scalp_st",
+				f"• لوریج: {self.settings.futures_leverage} | مود مارجین: {self.settings.futures_position_mode}",
+				f"• USE_FULL_BALANCE: {self.settings.use_full_balance}",
+			]
+		else:
+			intro_lines += [
+				"• استراتژی: macd_zero_trend",
+				f"• EMA: {self.settings.ema_fast}/{self.settings.ema_slow} | MACD: {self.settings.macd_fast}/{self.settings.macd_slow}/{self.settings.macd_signal}",
+			]
 		await message.answer("\n".join(intro_lines), reply_markup=self.main_menu())
 
 	def _fmt_float(self, v: float, n: int) -> str:
@@ -99,15 +108,25 @@ class TelegramWorkerBot:
 		pos = self.state.position
 		paused = "بله" if self.state.is_paused else "خیر"
 		cooldown = f" (Cooldown: {self.state.cooldown_candles_remaining})" if self.state.cooldown_candles_remaining > 0 else ""
+		mode_badge = "[FUTURES]" if self.settings.trade_mode == "futures" else "[SPOT]"
+		sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
+		tf = self.settings.futures_timeframe if self.settings.trade_mode == "futures" else self.settings.timeframe
 		lines = [
-			"📊 وضعیت کارگر",
+			f"📊 وضعیت کارگر {mode_badge}",
+			f"• حالت: {self.settings.trade_mode}",
+			f"• نماد/تایم‌فریم: {sym} / {tf}",
 			f"• توقف: {paused}{cooldown}",
-			"• استراتژی: macd_zero_trend",
+		]
+		if self.settings.trade_mode == "futures":
+			lines.append("• استراتژی: futures_scalp_st")
+		else:
+			lines.append("• استراتژی: macd_zero_trend")
+		lines += [
 			f"• آخرین کندل: {self.state.last_candle_ts or '-'}",
 			"",
 			"پوزیشن:",
 			f"  - لانگ: {pos.is_long}",
-			f"  - مقدار: {self._fmt_float(pos.quantity, 6)} {self.settings.symbol.split('/')[0]}",
+			f"  - مقدار: {self._fmt_float(pos.quantity, 6)} {sym.split('/')[0]}",
 			f"  - قیمت ورود: {self._fmt_float(pos.entry_price, 4)}",
 			"",
 			"سیگنال اخیر:",
@@ -119,10 +138,6 @@ class TelegramWorkerBot:
 		ema_slow = metrics.get("ema_slow")
 		h_prev = metrics.get("macd_hist_prev")
 		h_now = metrics.get("macd_hist_now")
-		trend_ok = bool(metrics.get("trend_ok", 0.0))
-		zero_up = bool(metrics.get("zero_up", 0.0))
-		zero_down = bool(metrics.get("zero_down", 0.0))
-		rsi_now = metrics.get("rsi_now")
 		vals = []
 		if ema_fast is not None and ema_slow is not None:
 			vals.append(f"  - EMA_fast/slow: {self._fmt_float(ema_fast,2)} / {self._fmt_float(ema_slow,2)}")
@@ -130,17 +145,21 @@ class TelegramWorkerBot:
 			vals.append(f"  - MACD Hist: prev={self._fmt_float(h_prev,4)} now={self._fmt_float(h_now,4)}")
 		if vals:
 			lines += vals
-		# Entry condition summary
-		entry_ok = trend_ok and zero_up and (True if not self.settings.rsi_confirm else (rsi_now is not None and rsi_now >= self.settings.rsi_confirm_level))
-		lines += [
-			"",
-			"شرایط ورود (BUY):",
-			f"  - روند (EMA50>EMA200): {'بله' if trend_ok else 'خیر'}",
-			f"  - MACD zero-cross up: {'بله' if zero_up else 'خیر'}",
-		]
-		if self.settings.rsi_confirm:
-			lines.append(f"  - RSI ≥ {self.settings.rsi_confirm_level}: {'بله' if (rsi_now is not None and rsi_now >= self.settings.rsi_confirm_level) else 'خیر'}")
-		lines.append(f"  => نتیجه: {'آماده ورود' if entry_ok else 'ورود غیرفعال'}")
+		if self.settings.trade_mode == "spot":
+			# Entry condition summary for spot
+			trend_ok = bool(metrics.get("trend_ok", 0.0))
+			zero_up = bool(metrics.get("zero_up", 0.0))
+			rsi_now = metrics.get("rsi_now")
+			entry_ok = trend_ok and zero_up and (True if not self.settings.rsi_confirm else (rsi_now is not None and rsi_now >= self.settings.rsi_confirm_level))
+			lines += [
+				"",
+				"شرایط ورود (BUY):",
+				f"  - روند (EMA>EMA): {'بله' if trend_ok else 'خیر'}",
+				f"  - MACD zero-up: {'بله' if zero_up else 'خیر'}",
+			]
+			if self.settings.rsi_confirm:
+				lines.append(f"  - RSI ≥ {self.settings.rsi_confirm_level}: {'بله' if (rsi_now is not None and rsi_now >= self.settings.rsi_confirm_level) else 'خیر'}")
+			lines.append(f"  => نتیجه: {'آماده ورود' if entry_ok else 'ورود غیرفعال'}")
 		lines += ["", f"سود/زیان روزانه: {self._fmt_float(self.state.daily_pnl,4)} USDT"]
 		return "\n".join(lines)
 

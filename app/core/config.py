@@ -18,7 +18,7 @@ class Settings(BaseModel):
 	lbank_api_secret: Optional[str] = Field(default=None, alias="LBANK_API_SECRET")
 
 	# Trade mode
-	trade_mode: str = Field(default="spot", alias="TRADE_MODE")  # spot | futures
+	trade_mode: str = Field(default="futures", alias="TRADE_MODE")  # spot | futures
 
 	# Spot trading (macd_zero_trend)
 	symbol: str = Field(default="ETH/USDT", alias="SYMBOL")
