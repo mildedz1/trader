@@ -129,6 +129,31 @@ async def run_tick_futures(adapter: ExchangeAdapter, state: WorkerState, fstate:
 			exit_signal = True
 		if pos.is_short and (zero_up or st_dir == 1 or ema_fast_series[-1] >= ema_slow_series[-1]):
 			exit_signal = True
+		# SL/TP and trailing management on closed candles
+		# Compute 1R distance
+		if pos.is_long:
+			R = max(1e-8, pos.entry_price - pos.sl)
+			# Move SL to breakeven after +1R and trail if enabled
+			if price >= pos.entry_price + R:
+				if pos.sl < pos.entry_price:
+					pos.sl = pos.entry_price
+				if getattr(settings, 'trail_enable', False):
+					trail = atr14[-1] * float(getattr(settings, 'trail_atr_mult', 0.8))
+					pos.sl = max(pos.sl, price - trail)
+			# SL/TP hit
+			if price <= pos.sl or price >= pos.tp:
+				exit_signal = True
+		else:
+			R = max(1e-8, pos.sl - pos.entry_price)
+			if price <= pos.entry_price - R:
+				if pos.sl > pos.entry_price:
+					pos.sl = pos.entry_price
+				if getattr(settings, 'trail_enable', False):
+					trail = atr14[-1] * float(getattr(settings, 'trail_atr_mult', 0.8))
+					pos.sl = min(pos.sl, price + trail)
+			# SL/TP hit
+			if price >= pos.sl or price <= pos.tp:
+				exit_signal = True
 		if exit_signal:
 			if state.order_lock:
 				return {"status": "locked"}
@@ -141,7 +166,7 @@ async def run_tick_futures(adapter: ExchangeAdapter, state: WorkerState, fstate:
 					state.cooldown_candles_remaining = max(0, int(settings.cooldown_candles_after_exit))
 					logger.info(f"FUTURES exit: {order}")
 					if state.notify:
-						await state.notify("خروج فیوچرز انجام شد")
+						await state.notify("خروج فیوچرز (SL/TP/سیگنال) انجام شد")
 					return {"status": "futures_exit", "order": order}
 			finally:
 				state.order_lock = False
