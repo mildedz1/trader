@@ -98,7 +98,11 @@ async def main_async() -> None:
 	# Telegram bot
 	from .bot.telegram_bot import TelegramWorkerBot
 
-	bot = TelegramWorkerBot(settings, worker.state)
+	try:
+		bot = TelegramWorkerBot(settings, worker.state)
+	except Exception:
+		await worker.shutdown()
+		raise
 
 	loop_task = asyncio.create_task(worker.loop())
 	bot_task = asyncio.create_task(bot.run())
