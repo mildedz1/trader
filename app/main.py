@@ -94,12 +94,40 @@ class Worker:
 			if not ohlcv or len(ohlcv) < required_n:
 				return "داده کافی برای ارزیابی سیگنال وجود ندارد."
 			closes = [float(c[4]) for c in ohlcv]
-			last_closed_ts = int(ohlcv[-1][0])
-			from .strategy.logic import evaluate_macd_zero_trend
+			from .strategy.logic import evaluate_macd_zero_trend, compute_position_size_usdt_capped
 			res = evaluate_macd_zero_trend(closes, self.settings)
-			trend_ok = 'بله' if res.extra.get('trend_ok', 0.0) == 1.0 else 'خیر'
-			zero_up = 'بله' if res.extra.get('zero_up', 0.0) == 1.0 else 'خیر'
-			msg = f"Trend OK: {trend_ok}\nMACD zero-up: {zero_up}\nshould_long={res.should_long} should_exit={res.should_exit}"
+			trend_ok = res.extra.get('trend_ok', 0.0) == 1.0
+			zero_up = res.extra.get('zero_up', 0.0) == 1.0
+			# Sizing & min rules
+			ticker_price = closes[-1]
+			amount_base_cap, amount_quote_cap = await compute_position_size_usdt_capped(self.adapter, self.settings, ticker_price)
+			min_cost = 0.0
+			min_amount = 0.0
+			try:
+				mr = self.adapter.get_market_rules(self.settings.symbol)  # type: ignore[attr-defined]
+				min_cost = float(mr.get('min_cost', 0.0))
+				min_amount = float(mr.get('min_amount', 0.0))
+			except Exception:
+				pass
+			notional = amount_base_cap * ticker_price
+			entry_possible = res.should_long and (notional >= max(min_cost, 0.0)) and (amount_base_cap >= max(min_amount, 0.0))
+			reasons = []
+			if not res.should_long:
+				reasons.append('تریگر ورود فعال نیست')
+			if notional < max(min_cost, 0.0):
+				reasons.append(f'کمتر از حداقل ارزش سفارش صرافی: notional={notional:.4f} < min_cost={min_cost}')
+			if amount_base_cap < max(min_amount, 0.0):
+				reasons.append(f'کمتر از حداقل مقدار: amount={amount_base_cap:.8f} < min_amount={min_amount}')
+			msg = (
+				f"Trend OK: {'بله' if trend_ok else 'خیر'}\n"
+				f"MACD zero-up: {'بله' if zero_up else 'خیر'}\n"
+				f"should_long={res.should_long} should_exit={res.should_exit}\n"
+				f"price={ticker_price:.4f} amount_base_cap={amount_base_cap:.8f} notional={notional:.4f} USDT\n"
+				f"min_cost={min_cost} min_amount={min_amount}\n"
+				f"entry_possible={'بله' if entry_possible else 'خیر'}"
+			)
+			if reasons:
+				msg += "\nدلایل: " + "; ".join(reasons)
 			return msg
 
 		async def manual_buy() -> str:
