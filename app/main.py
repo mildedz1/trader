@@ -52,6 +52,56 @@ class Worker:
 
 		self.state.balance_provider = balance_provider
 
+		async def check_signal() -> str:
+			# Fetch latest required data and evaluate once
+			required_n = max(200, int(self.settings.ema_slow) + 1, int(self.settings.macd_slow) + int(self.settings.macd_signal) + 1)
+			ohlcv = await self.fetch_ohlcv(limit=max(required_n + 5, 220))
+			if not ohlcv or len(ohlcv) < required_n:
+				return "داده کافی برای ارزیابی سیگنال وجود ندارد."
+			closes = [float(c[4]) for c in ohlcv]
+			last_closed_ts = int(ohlcv[-1][0])
+			from .strategy.logic import evaluate_macd_zero_trend
+			res = evaluate_macd_zero_trend(closes, self.settings)
+			trend_ok = 'بله' if res.extra.get('trend_ok', 0.0) == 1.0 else 'خیر'
+			zero_up = 'بله' if res.extra.get('zero_up', 0.0) == 1.0 else 'خیر'
+			msg = f"Trend OK: {trend_ok}\nMACD zero-up: {zero_up}\nshould_long={res.should_long} should_exit={res.should_exit}"
+			return msg
+
+		async def manual_buy() -> str:
+			try:
+				bal = await self.adapter.fetch_balance()
+				ticker = await self.adapter.fetch_ticker(self.settings.symbol)
+				price = float(ticker.get("last") or ticker.get("close") or 0.0)
+				from .strategy.logic import compute_position_size_usdt_capped
+				amount_base_cap, amount_quote_cap = await compute_position_size_usdt_capped(self.adapter, self.settings, price)
+				if amount_quote_cap <= 0 or amount_base_cap <= 0:
+					return "امکان خرید نیست: موجودی/سایز ناکافی"
+				order = await self.adapter.create_market_buy_order(self.settings.symbol, amount_quote_cap)
+				return f"خرید دستی انجام شد: {order}"
+			except Exception as exc:
+				return f"خرید دستی ناموفق بود: {exc}"
+
+		async def manual_close() -> str:
+			try:
+				bal = await self.adapter.fetch_balance()
+				base_ccy = self.settings.symbol.split("/")[0]
+				base = float((bal.get("free") or bal.get("total") or {}).get(base_ccy, 0.0))
+				if base <= 0:
+					return "هیچ پوزیشن/موجودی برای فروش وجود ندارد"
+				ticker = await self.adapter.fetch_ticker(self.settings.symbol)
+				price = float(ticker.get("last") or ticker.get("close") or 0.0)
+				# ریسک: فروش با سقف 1 USDT معادل
+				notional = min(base * price, 1.0)
+				amount_to_sell = notional / price if price > 0 else 0.0
+				order = await self.adapter.create_market_sell_order(self.settings.symbol, amount_to_sell)
+				return f"فروش دستی انجام شد: {order}"
+			except Exception as exc:
+				return f"فروش دستی ناموفق بود: {exc}"
+
+		self.state.check_signal = check_signal
+		self.state.manual_buy = manual_buy
+		self.state.manual_close = manual_close
+
 	async def fetch_ohlcv(self, limit: int = 300):
 		client = ccxt.lbank({"enableRateLimit": True})
 		try:

@@ -53,6 +53,10 @@ class TelegramWorkerBot:
 				InlineKeyboardButton(text="ادامه", callback_data="menu:resume"),
 			],
 			[
+				InlineKeyboardButton(text="چک سیگنال", callback_data="menu:check_signal"),
+				InlineKeyboardButton(text="ورود دستی (BUY)", callback_data="menu:manual_buy"),
+			],
+			[
 				InlineKeyboardButton(text="لاگ‌ها", callback_data="menu:logs"),
 				InlineKeyboardButton(text="تنظیمات", callback_data="menu:config"),
 			],
@@ -155,6 +159,16 @@ class TelegramWorkerBot:
 		elif action == "balance":
 			await self._send_balance(chat_id)
 			await cq.answer("موجودی به‌روزرسانی شد.")
+		elif action == "check_signal":
+			if self.state.check_signal:
+				text = await self.state.check_signal()
+				await self.bot.send_message(chat_id, text)
+			await cq.answer()
+		elif action == "manual_buy":
+			if self.state.manual_buy:
+				text = await self.state.manual_buy()
+				await self.bot.send_message(chat_id, text)
+			await cq.answer()
 		elif action == "pause":
 			self.state.is_paused = True
 			await cq.message.edit_text("ربات در حالت توقف قرار گرفت.", reply_markup=self.main_menu())
