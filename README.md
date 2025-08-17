@@ -73,3 +73,18 @@ pip install -r requirements.txt --break-system-packages
 ## Notes
 - By default, the service runs in demo mode and will simulate orders using the paper adapter while still fetching public OHLCV from LBank via ccxt.
 - To enable live trading, set `MODE=live` and provide `LBANK_API_KEY` and `LBANK_API_SECRET` (Trade+Read only; withdrawals disabled).
+
+## Fast update (dev)
+
+Use the override to bind-mount source and avoid rebuilds:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
+# After editing Python files, just restart container to reload process
+docker compose restart trader_worker
+```
+
+For dependency changes (requirements.txt) or base image updates, rebuild:
+```bash
+docker compose up -d --build
+```

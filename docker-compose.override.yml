@@ -1,0 +1,5 @@
+services:
+  trader_worker:
+    volumes:
+      - ./app:/app/app
+      - ./healthcheck.py:/app/healthcheck.py
