@@ -15,6 +15,7 @@ class CcxtLBankAdapter(ExchangeAdapter):
 			"apiKey": self.api_key,
 			"secret": self.api_secret,
 			"enableRateLimit": True,
+			"timeout": 15000,
 		})
 
 	async def connect(self) -> None:
