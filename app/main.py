@@ -32,10 +32,11 @@ class Worker:
 		async def balance_provider() -> str:
 			bal = await self.adapter.fetch_balance()
 			free = bal.get("free") or bal.get("total") or {}
-			base_ccy, quote_ccy = self.settings.symbol.split("/")
+			sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
+			base_ccy, quote_ccy = sym.split("/")
 			base = float(free.get(base_ccy, 0.0))
 			usdt = float(free.get(quote_ccy, 0.0))
-			ticker = await self.adapter.fetch_ticker(self.settings.symbol)
+			ticker = await self.adapter.fetch_ticker(sym)
 			price = float(ticker.get("last") or ticker.get("close") or 0.0)
 			equity = usdt + base * price
 			ready_buy = usdt >= 1.0
@@ -43,7 +44,7 @@ class Worker:
 			lines = [
 				f"موجودی {quote_ccy}: {usdt:.4f}",
 				f"موجودی {base_ccy}: {base:.8f}",
-				f"قیمت {self.settings.symbol}: {price:.4f}",
+				f"قیمت {sym}: {price:.4f}",
 				f"اکویتی تقریبی: {equity:.4f} USDT",
 				f"آمادگی خرید (≤ 1 USDT): {'بله' if ready_buy else 'خیر'}",
 				f"آمادگی فروش (≤ 1 USDT معادل): {'بله' if ready_sell else 'خیر'}",
@@ -53,12 +54,13 @@ class Worker:
 		self.state.balance_provider = balance_provider
 
 		async def position_overview() -> str:
-			base_ccy, quote_ccy = self.settings.symbol.split("/")
+			sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
+			base_ccy, quote_ccy = sym.split("/")
 			bal = await self.adapter.fetch_balance()
 			free = bal.get("free") or bal.get("total") or {}
 			base = float(free.get(base_ccy, 0.0))
 			usdt = float(free.get(quote_ccy, 0.0))
-			ticker = await self.adapter.fetch_ticker(self.settings.symbol)
+			ticker = await self.adapter.fetch_ticker(sym)
 			price = float(ticker.get("last") or ticker.get("close") or 0.0)
 			pnl = 0.0
 			if self.state.position.is_long and self.state.position.quantity > 0 and self.state.position.entry_price > 0:
@@ -73,7 +75,7 @@ class Worker:
 			]
 			# Also list open orders on the symbol (if any)
 			try:
-				orders = await self.adapter.fetch_open_orders(self.settings.symbol)
+				orders = await self.adapter.fetch_open_orders(sym)
 				if orders:
 					lines.append("")
 					lines.append("سفارش‌های باز:")
@@ -133,13 +135,14 @@ class Worker:
 		async def manual_buy() -> str:
 			try:
 				bal = await self.adapter.fetch_balance()
-				ticker = await self.adapter.fetch_ticker(self.settings.symbol)
+				sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
+				ticker = await self.adapter.fetch_ticker(sym)
 				price = float(ticker.get("last") or ticker.get("close") or 0.0)
 				from .strategy.logic import compute_position_size_usdt_capped
 				amount_base_cap, amount_quote_cap = await compute_position_size_usdt_capped(self.adapter, self.settings, price)
 				if amount_quote_cap <= 0 or amount_base_cap <= 0:
 					return "امکان خرید نیست: موجودی/سایز ناکافی"
-				order = await self.adapter.create_market_buy_order(self.settings.symbol, amount_quote_cap)
+				order = await self.adapter.create_market_buy_order(sym, amount_quote_cap)
 				return f"خرید دستی انجام شد: {order}"
 			except Exception as exc:
 				return f"خرید دستی ناموفق بود: {exc}"
@@ -147,16 +150,17 @@ class Worker:
 		async def manual_close() -> str:
 			try:
 				bal = await self.adapter.fetch_balance()
-				base_ccy = self.settings.symbol.split("/")[0]
+				sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
+				base_ccy = sym.split("/")[0]
 				base = float((bal.get("free") or bal.get("total") or {}).get(base_ccy, 0.0))
 				if base <= 0:
 					return "هیچ پوزیشن/موجودی برای فروش وجود ندارد"
-				ticker = await self.adapter.fetch_ticker(self.settings.symbol)
+				ticker = await self.adapter.fetch_ticker(sym)
 				price = float(ticker.get("last") or ticker.get("close") or 0.0)
 				# ریسک: فروش با سقف 1 USDT معادل
 				notional = min(base * price, 1.0)
 				amount_to_sell = notional / price if price > 0 else 0.0
-				order = await self.adapter.create_market_sell_order(self.settings.symbol, amount_to_sell)
+				order = await self.adapter.create_market_sell_order(sym, amount_to_sell)
 				return f"فروش دستی انجام شد: {order}"
 			except Exception as exc:
 				return f"فروش دستی ناموفق بود: {exc}"
