@@ -43,13 +43,15 @@ class CcxtLBankAdapter(ExchangeAdapter):
 			return []
 
 	async def create_market_buy_order(self, symbol: str, amount_quote: float) -> Dict[str, Any]:
+		# Convert quote amount to base amount using ticker price; pass price for LBank market buy
 		ticker = await self.fetch_ticker(symbol)
 		price = float(ticker.get("last") or ticker.get("close"))
 		if price <= 0:
 			raise ValueError("Invalid ticker price for market buy")
 		amount_base = amount_quote / price
 		amount_base = float(self.exchange.amount_to_precision(symbol, amount_base))
-		return await self.exchange.create_order(symbol, type="market", side="buy", amount=amount_base)
+		# Some exchanges (like LBank) require the price arg for market buy to compute cost
+		return await self.exchange.create_order(symbol, type="market", side="buy", amount=amount_base, price=price)
 
 	async def create_market_sell_order(self, symbol: str, amount_base: float) -> Dict[str, Any]:
 		amount_base = float(self.exchange.amount_to_precision(symbol, amount_base))
