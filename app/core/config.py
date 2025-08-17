@@ -17,11 +17,12 @@ class Settings(BaseModel):
 	lbank_api_key: Optional[str] = Field(default=None, alias="LBANK_API_KEY")
 	lbank_api_secret: Optional[str] = Field(default=None, alias="LBANK_API_SECRET")
 
-	# Trading common
+	# Trade mode
+	trade_mode: str = Field(default="spot", alias="TRADE_MODE")  # spot | futures
+
+	# Spot trading (macd_zero_trend)
 	symbol: str = Field(default="ETH/USDT", alias="SYMBOL")
 	timeframe: str = Field(default="30m", alias="TIMEFRAME")
-
-	# macd_zero_trend params
 	ema_fast: int = Field(default=50, alias="EMA_FAST")
 	ema_slow: int = Field(default=200, alias="EMA_SLOW")
 	macd_fast: int = Field(default=12, alias="MACD_FAST")
@@ -30,10 +31,24 @@ class Settings(BaseModel):
 	rsi_confirm: bool = Field(default=False, alias="RSI_CONFIRM")
 	rsi_confirm_level: float = Field(default=45.0, alias="RSI_CONFIRM_LEVEL")
 
+	# Futures trading (futures_supertrend_macd)
+	futures_symbol: str = Field(default="ETH/USDT", alias="FUTURES_SYMBOL")
+	futures_timeframe: str = Field(default="15m", alias="FUTURES_TIMEFRAME")
+	futures_leverage: int = Field(default=5, alias="FUTURES_LEVERAGE")
+	futures_position_mode: str = Field(default="isolated", alias="FUTURES_POSITION_MODE")  # isolated|cross
+	futures_max_positions: int = Field(default=1, alias="FUTURES_MAX_POSITIONS")
+	futures_allow_short: bool = Field(default=True, alias="FUTURES_ALLOW_SHORT")
+	futures_testnet: bool = Field(default=False, alias="FUTURES_TESTNET")
+	st_supertrend_atr_period: int = Field(default=10, alias="ST_SUPERTREND_ATR_PERIOD")
+	st_supertrend_atr_mult: float = Field(default=3.0, alias="ST_SUPERTREND_ATR_MULT")
+	sl_atr_mult: float = Field(default=1.5, alias="SL_ATR_MULT")
+	tp_rr: float = Field(default=2.0, alias="TP_RR")
+	use_full_balance: bool = Field(default=True, alias="USE_FULL_BALANCE")
+
 	# Risk & loop
 	tick_interval_sec: float = Field(default=15.0, alias="TICK_INTERVAL_SEC")
 	risk_position_mode: str = Field(default="fixed_amount", alias="RISK_POSITION_MODE")
-	risk_position_size: float = Field(default=1.0, alias="RISK_POSITION_SIZE")  # USDT
+	risk_position_size: float = Field(default=1.0, alias="RISK_POSITION_SIZE")  # USDT for spot
 	max_daily_loss_pct: float = Field(default=3.0, alias="MAX_DAILY_LOSS_PCT")
 	reset_hour_utc: int = Field(default=0, alias="RESET_HOUR_UTC")
 	cooldown_candles_after_exit: int = Field(default=1, alias="COOLDOWN_CANDLES_AFTER_EXIT")
@@ -68,6 +83,14 @@ class Settings(BaseModel):
 	def validate_mode(cls, v: str):
 		if v != "live":
 			raise ValueError("Only live mode is supported (no demo/paper)")
+		return v
+
+	@field_validator("trade_mode")
+	@classmethod
+	def validate_trade_mode(cls, v: str):
+		allowed = {"spot", "futures"}
+		if v not in allowed:
+			raise ValueError(f"TRADE_MODE must be one of {allowed}")
 		return v
 
 	@classmethod

@@ -62,3 +62,62 @@ def macd(values: Iterable[float], fast: int, slow: int, signal: int) -> Tuple[Li
 	signal_line = ema(macd_line, signal)
 	hist = [m - s for m, s in zip(macd_line, signal_line)]
 	return macd_line, signal_line, hist
+
+
+def atr(highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> List[float]:
+	if period <= 0:
+		raise ValueError("ATR period must be > 0")
+	tr: List[float] = []
+	for i in range(len(closes)):
+		if i == 0:
+			tr.append(highs[i] - lows[i])
+		else:
+			hl = highs[i] - lows[i]
+			hc = abs(highs[i] - closes[i - 1])
+			lc = abs(lows[i] - closes[i - 1])
+			tr.append(max(hl, hc, lc))
+	atr_vals: List[float] = []
+	for i, v in enumerate(tr):
+		if i == 0:
+			atr_vals.append(v)
+		else:
+			atr_vals.append((atr_vals[-1] * (period - 1) + v) / period)
+	return atr_vals
+
+
+def supertrend(highs: List[float], lows: List[float], closes: List[float], period: int, multiplier: float) -> Tuple[List[float], List[int]]:
+	# Returns (supertrend_line, trend_direction) where trend_direction: 1=Long, -1=Short
+	atr_vals = atr(highs, lows, closes, period)
+	basic_upper: List[float] = []
+	basic_lower: List[float] = []
+	for i in range(len(closes)):
+		mid = (highs[i] + lows[i]) / 2.0
+		basic_upper.append(mid + multiplier * atr_vals[i])
+		basic_lower.append(mid - multiplier * atr_vals[i])
+	final_upper: List[float] = basic_upper.copy()
+	final_lower: List[float] = basic_lower.copy()
+	for i in range(1, len(closes)):
+		if basic_upper[i] < final_upper[i - 1] or closes[i - 1] > final_upper[i - 1]:
+			final_upper[i] = basic_upper[i]
+		else:
+			final_upper[i] = final_upper[i - 1]
+		if basic_lower[i] > final_lower[i - 1] or closes[i - 1] < final_lower[i - 1]:
+			final_lower[i] = basic_lower[i]
+		else:
+			final_lower[i] = final_lower[i - 1]
+	super: List[float] = [0.0] * len(closes)
+	trend: List[int] = [1] * len(closes)
+	for i in range(1, len(closes)):
+		if super[i - 1] == final_upper[i - 1] and closes[i] <= final_upper[i]:
+			super[i] = final_upper[i]
+			trend[i] = -1
+		elif super[i - 1] == final_upper[i - 1] and closes[i] > final_upper[i]:
+			super[i] = final_lower[i]
+			trend[i] = 1
+		elif super[i - 1] == final_lower[i - 1] and closes[i] >= final_lower[i]:
+			super[i] = final_lower[i]
+			trend[i] = 1
+		else:
+			super[i] = final_upper[i]
+			trend[i] = -1
+	return super, trend
