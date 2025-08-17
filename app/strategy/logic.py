@@ -43,16 +43,13 @@ def evaluate_ema_rsi(closes: List[float], settings: Settings) -> StrategyResult:
 def evaluate_bb_breakout(closes: List[float], settings: Settings) -> StrategyResult:
 	upper, basis, lower = bollinger_bands(closes, settings.bb_period, settings.bb_std)
 	bw = bb_bandwidth(upper, basis, lower)
-	# Compute threshold from last 200 bandwidths
 	lookback = min(len(bw), settings.bb_bw_lookback)
 	bw_tail = [x for x in bw[-lookback:] if x > 0]
 	bw_thresh = percentile(bw_tail, settings.bb_bw_pctl) if bw_tail else 0.0
 	is_squeeze = bw[-1] <= bw_thresh if bw_tail else False
-	# Entry: close crosses above upper band and RSI >= confirm
 	rsi_series = rsi(closes, settings.rsi_period)
 	cross_up = closes[-2] <= upper[-2] and closes[-1] > upper[-1]
 	should_long = bool(is_squeeze and cross_up and rsi_series[-1] >= settings.rsi_confirm)
-	# Exit: close below basis OR RSI < 40
 	should_exit = bool((closes[-1] < basis[-1]) or (rsi_series[-1] < 40))
 	return StrategyResult(should_long, should_exit, {
 		"bb_bw": bw[-1] if bw else 0.0,
@@ -81,7 +78,6 @@ async def compute_position_size_usdt_capped(adapter: ExchangeAdapter, settings: 
 
 
 async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Settings, closes: List[float], candle_ts: int | None = None) -> Dict:
-	# Only act on new closed candle
 	if candle_ts is not None:
 		if state.last_action_candle_ts is not None and candle_ts <= state.last_action_candle_ts:
 			return {"status": "waiting_candle"}
@@ -89,13 +85,11 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 	res = select_strategy(closes, settings)
 	state.last_signal = f"{settings.strategy_id} | {res.extra} | long={res.should_long} exit={res.should_exit}"
 
-	# Update heartbeat
 	state.heartbeat(settings.heartbeat_path)
 
 	if state.is_paused:
 		return {"status": "paused", "signal": state.last_signal}
 
-	# Enforce daily reset and loss limit
 	bal = await adapter.fetch_balance()
 	quote = float((bal.get("total") or {}).get("USDT", 0.0))
 	base = float((bal.get("total") or {}).get(settings.symbol.split("/")[0], 0.0))
@@ -108,35 +102,30 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 		state.update_daily_pnl(current_equity)
 	if state.reached_daily_loss_limit(settings.max_daily_loss_pct):
 		state.is_paused = True
-		msg = "Daily loss limit reached. Pausing trading."
-		logger.warning(msg)
+		msg = "محدودیت ضرر روزانه فعال شد. ربات موقتا متوقف می‌شود."
+		logger.warning("Daily loss limit reached. Pausing trading.")
 		if state.notify:
 			await state.notify(msg)
 		return {"status": "paused_loss_limit", "signal": state.last_signal}
 
-	# Cooldown handling
 	if state.cooldown_candles_remaining > 0:
 		state.cooldown_candles_remaining -= 1
 		return {"status": "cooldown", "remaining": state.cooldown_candles_remaining}
 
-	# Position management with $1 cap and min-notional checks
 	base_ccy = settings.symbol.split("/")[0]
 	if state.position.is_long:
 		if res.should_exit:
 			amount_base = state.position.quantity
-			amount_base = min(amount_base, base)  # cannot sell more than available
+			amount_base = min(amount_base, base)
 			if amount_base <= 0:
 				state.position.reset()
 				return {"status": "flat_reset"}
-			# clip notional to $1 cap
 			notional = min(amount_base * price, 1.0)
 			amount_to_sell = notional / price if price > 0 else 0.0
 			if amount_to_sell <= 0:
 				return {"status": "noop_sell_zero"}
-			# round to lot size
 			if hasattr(adapter, "round_amount"):
 				amount_to_sell = adapter.round_amount(settings.symbol, amount_to_sell)  # type: ignore[attr-defined]
-			# check min-notional/min-amount
 			min_cost = 0.0
 			min_amount = 0.0
 			if hasattr(adapter, "get_market_rules"):
@@ -144,8 +133,8 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 				min_cost = float(mr.get("min_cost", 0.0))
 				min_amount = float(mr.get("min_amount", 0.0))
 			if (amount_to_sell * price) < max(min_cost, 0.0) or amount_to_sell < max(min_amount, 0.0):
-				msg = f"SELL skipped: below exchange min (amount={amount_to_sell}, notional={amount_to_sell*price:.4f} USDT)"
-				logger.warning(msg)
+				msg = f"فروش انجام نشد: کمتر از حداقل صرافی (amount={amount_to_sell}, notional={amount_to_sell*price:.4f} USDT)"
+				logger.warning("SELL skipped: below exchange min")
 				if state.notify:
 					await state.notify(msg)
 				return {"status": "sell_min_notional_skip"}
@@ -158,7 +147,6 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 				logger.info(f"Exit long: {order}")
 				if candle_ts is not None:
 					state.last_action_candle_ts = candle_ts
-				# apply cooldown
 				state.cooldown_candles_remaining = max(0, int(settings.cooldown_candles_after_exit))
 				return {"status": "sold", "order": order, "signal": state.last_signal}
 			finally:
@@ -170,7 +158,6 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 			amount_base_cap, amount_quote_cap = await compute_position_size_usdt_capped(adapter, settings, price)
 			if amount_quote_cap <= 0 or amount_base_cap <= 0:
 				return {"status": "insufficient_funds", "signal": state.last_signal}
-			# respect rounding and min rules
 			if hasattr(adapter, "round_amount"):
 				amount_base_cap = adapter.round_amount(settings.symbol, amount_base_cap)  # type: ignore[attr-defined]
 			min_cost = 0.0
@@ -181,8 +168,8 @@ async def run_tick(adapter: ExchangeAdapter, state: WorkerState, settings: Setti
 				min_amount = float(mr.get("min_amount", 0.0))
 			notional = amount_base_cap * price
 			if notional < max(min_cost, 0.0) or amount_base_cap < max(min_amount, 0.0):
-				msg = f"BUY skipped: below exchange min (amount={amount_base_cap}, notional={notional:.4f} USDT)"
-				logger.warning(msg)
+				msg = f"خرید انجام نشد: کمتر از حداقل صرافی (amount={amount_base_cap}, notional={notional:.4f} USDT)"
+				logger.warning("BUY skipped: below exchange min")
 				if state.notify:
 					await state.notify(msg)
 				return {"status": "buy_min_notional_skip"}

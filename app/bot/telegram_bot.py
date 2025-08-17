@@ -6,6 +6,7 @@ import os
 from typing import Callable, Optional
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import Message
 from loguru import logger
@@ -18,7 +19,7 @@ class TelegramWorkerBot:
 	def __init__(self, settings: Settings, state: WorkerState):
 		self.settings = settings
 		self.state = state
-		self.bot = Bot(token=settings.telegram_token)
+		self.bot = Bot(token=settings.telegram_token, parse_mode=ParseMode.MARKDOWN)
 		self.dp = Dispatcher()
 
 		self.dp.message.register(self.cmd_start, Command(commands=["start"]))
@@ -44,41 +45,45 @@ class TelegramWorkerBot:
 	async def cmd_start(self, message: Message) -> None:
 		if not self.is_allowed(message):
 			return
-		intro = (
-			"LBank Spot Trader Worker\n"
-			"Mode: live-only (no demo). Use keys with Trade+Read only and WITHDRAWALS DISABLED.\n\n"
-			f"Symbol: {self.settings.symbol} Timeframe: {self.settings.timeframe}\n"
-			f"Strategy: {self.settings.strategy_id}\n"
-			f"Risk: fixed_amount={self.settings.risk_position_size} USDT (hard cap $1)\n"
-			f"EMA: {self.settings.ema_fast}/{self.settings.ema_slow} | RSI: {self.settings.rsi_period} entry={self.settings.rsi_entry} exit={self.settings.rsi_exit}\n"
-			f"BB: period={self.settings.bb_period} std={self.settings.bb_std} bw_pctl={self.settings.bb_bw_pctl} rsi_confirm={self.settings.rsi_confirm}\n"
-			f"MaxDailyLoss: {self.settings.max_daily_loss_pct}% ResetHourUTC: {self.settings.reset_hour_utc}\n"
-		)
-		await message.answer(intro)
+		intro_lines = [
+			"ربات معامله‌گر LBank Spot (فقط حالت زنده)",
+			"لطفاً کلیدهای API با مجوز *Trade + Read* بسازید و *Withdrawals* را در صرافی *غیرفعال* نگه دارید.",
+			"",
+			f"- نماد: {self.settings.symbol}",
+			f"- تایم‌فریم: {self.settings.timeframe}",
+			f"- استراتژی: {self.settings.strategy_id}",
+			f"- ریسک: مقدار ثابت {self.settings.risk_position_size} USDT (سقف سخت 1 USDT هر سفارش)",
+			f"- EMA: {self.settings.ema_fast}/{self.settings.ema_slow} | RSI: {self.settings.rsi_period} ورودی={self.settings.rsi_entry} خروج={self.settings.rsi_exit}",
+			f"- Bollinger: دوره={self.settings.bb_period} انحراف={self.settings.bb_std} پهنای‌باند pctl={self.settings.bb_bw_pctl} RSI تایید={self.settings.rsi_confirm}",
+			f"- حداکثر باخت روزانه: {self.settings.max_daily_loss_pct}% | ساعت ریست (UTC): {self.settings.reset_hour_utc}",
+		]
+		await message.answer("\n".join(intro_lines))
 
 	async def cmd_status(self, message: Message) -> None:
 		if not self.is_allowed(message):
 			return
 		pos = self.state.position
-		status = (
-			f"Paused: {self.state.is_paused}\n"
-			f"Last signal: {self.state.last_signal}\n"
-			f"Position: long={pos.is_long} qty={pos.quantity:.6f} entry={pos.entry_price:.4f}\n"
-			f"DailyPnL: {self.state.daily_pnl:.4f}\n"
-		)
-		await message.answer(status)
+		status_lines = [
+			f"وضعیت توقف: {'بله' if self.state.is_paused else 'خیر'}",
+			f"آخرین سیگنال: {self.state.last_signal}",
+			f"پوزیشن: لانگ={pos.is_long} | مقدار={pos.quantity:.6f} | ورود={pos.entry_price:.4f}",
+			f"سود/زیان روزانه: {self.state.daily_pnl:.4f} USDT",
+		]
+		if self.state.cooldown_candles_remaining > 0:
+			status_lines.append(f"Cooldown: {self.state.cooldown_candles_remaining} کندل باقی‌مانده")
+		await message.answer("\n".join(status_lines))
 
 	async def cmd_pause(self, message: Message) -> None:
 		if not self.is_allowed(message):
 			return
 		self.state.is_paused = True
-		await message.answer("Paused trading.")
+		await message.answer("ربات در حالت توقف قرار گرفت.")
 
 	async def cmd_resume(self, message: Message) -> None:
 		if not self.is_allowed(message):
 			return
 		self.state.is_paused = False
-		await message.answer("Resumed trading.")
+		await message.answer("ربات از سر گرفته شد.")
 
 	async def cmd_config(self, message: Message) -> None:
 		if not self.is_allowed(message):
@@ -88,10 +93,10 @@ class TelegramWorkerBot:
 			try:
 				payload = json.loads(parts[1])
 				self.settings.persist_overrides(payload)
-				await message.answer("Config updated and persisted. Pause → change → Resume for strategy switch.")
+				await message.answer("تنظیمات به‌روزرسانی و ذخیره شد. برای تغییر استراتژی: ابتدا /pause سپس /config و در پایان /resume.")
 				return
 			except Exception as exc:  # noqa: BLE001
-				await message.answer(f"Invalid JSON: {exc}")
+				await message.answer(f"فرمت JSON نامعتبر است: {exc}")
 				return
 		cfg = {
 			"SYMBOL": self.settings.symbol,
@@ -101,20 +106,26 @@ class TelegramWorkerBot:
 			"RISK_POSITION_SIZE": self.settings.risk_position_size,
 			"MAX_DAILY_LOSS_PCT": self.settings.max_daily_loss_pct,
 			"RESET_HOUR_UTC": self.settings.reset_hour_utc,
-			# ema_rsi
 			"EMA_FAST": self.settings.ema_fast,
 			"EMA_SLOW": self.settings.ema_slow,
 			"RSI_PERIOD": self.settings.rsi_period,
 			"RSI_ENTRY": self.settings.rsi_entry,
 			"RSI_EXIT": self.settings.rsi_exit,
-			# bb_breakout
 			"BB_PERIOD": self.settings.bb_period,
 			"BB_STD": self.settings.bb_std,
 			"BB_BW_LOOKBACK": self.settings.bb_bw_lookback,
 			"BB_BW_PCTL": self.settings.bb_bw_pctl,
 			"RSI_CONFIRM": self.settings.rsi_confirm,
 		}
-		await message.answer("Current config as JSON (send /config {json} to update):\n" + json.dumps(cfg, indent=2))
+		help_text = """به‌روزرسانی تنظیمات:
+/config {JSON}
+
+نمونه:
+/config {\"STRATEGY_ID\":\"bb_breakout\",\"RISK_POSITION_SIZE\":1,\"SYMBOL\":\"ETH/USDT\"}
+
+توجه: برای تغییر استراتژی، بهتر است ابتدا ربات را متوقف (/pause) و سپس پس از تغییر، ادامه دهید (/resume)."""
+		await message.answer(help_text)
+		await message.answer("تنظیمات فعلی (JSON):\n" + json.dumps(cfg, indent=2))
 
 	async def cmd_logs(self, message: Message) -> None:
 		if not self.is_allowed(message):
@@ -122,14 +133,14 @@ class TelegramWorkerBot:
 		log_path = self.settings.log_path
 		try:
 			if not os.path.exists(log_path):
-				await message.answer("No logs yet.")
+				await message.answer("لاگی موجود نیست.")
 				return
 			with open(log_path, "r", encoding="utf-8") as f:
 				lines = f.readlines()[-50:]
-			await message.answer("".join(lines) or "(empty)")
+			await message.answer("آخرین ۵۰ خط لاگ:\n" + ("".join(lines) or "(خالی)"))
 		except Exception as exc:  # noqa: BLE001
-			await message.answer(f"Failed to read logs: {exc}")
+			await message.answer(f"خواندن لاگ ناموفق بود: {exc}")
 
 	async def run(self) -> None:
-		logger.info("Starting Telegram bot")
+		logger.info("Starting Telegram bot (FA)")
 		await self.dp.start_polling(self.bot)
