@@ -68,8 +68,9 @@ class Worker:
 		interval = float(self.settings.tick_interval_sec)
 		while not self._shutdown.is_set():
 			try:
-				ohlcv = await self.fetch_ohlcv(limit=max(self.settings.ema_slow + 5, 250))
-				if not ohlcv or len(ohlcv) < max(self.settings.ema_slow + 1, self.settings.rsi_period + 1):
+				required_n = max(200, int(self.settings.ema_slow) + 1, int(self.settings.macd_slow) + int(self.settings.macd_signal) + 1)
+				ohlcv = await self.fetch_ohlcv(limit=max(required_n + 5, 220))
+				if not ohlcv or len(ohlcv) < required_n:
 					await asyncio.sleep(interval)
 					continue
 				closes = [float(c[4]) for c in ohlcv]
