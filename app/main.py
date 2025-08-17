@@ -10,7 +10,6 @@ from .core.config import Settings
 from .core.logging import setup_logging
 from .core.state import WorkerState
 from .exchange_adapter.ccxt_lbank import CcxtLBankAdapter
-from .exchange_adapter.paper import PaperAdapter
 from .strategy.logic import run_tick
 import ccxt.async_support as ccxt  # keep import for runtime
 
@@ -24,26 +23,18 @@ class Worker:
 
 	async def startup(self) -> None:
 		logger.info("Use LBank API keys with Trade+Read only and Withdrawals disabled.")
-		if self.settings.mode == "live":
-			if not self.settings.lbank_api_key or not self.settings.lbank_api_secret:
-				raise SystemExit("LBANK_API_KEY and LBANK_API_SECRET are required in live mode")
-			self.adapter = CcxtLBankAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
-		else:
-			self.adapter = PaperAdapter()
+		if not self.settings.lbank_api_key or not self.settings.lbank_api_secret:
+			raise SystemExit("LBANK_API_KEY and LBANK_API_SECRET are required (live-only mode)")
+		self.adapter = CcxtLBankAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
 		await self.adapter.connect()
 		logger.info("Connected to exchange adapter")
 
-	async def fetch_closes(self, limit: int = 300) -> List[float]:
-		# In demo mode, we still need OHLCV from ccxt public; use a public client
+	async def fetch_ohlcv(self, limit: int = 300):
 		client = ccxt.lbank({"enableRateLimit": True})
 		try:
 			await client.load_markets()
 			ohlcv = await client.fetch_ohlcv(self.settings.symbol, timeframe=self.settings.timeframe, limit=limit)
-			closes = [float(c[4]) for c in ohlcv]
-			# In paper adapter, update price reference
-			if isinstance(self.adapter, PaperAdapter) and closes:
-				self.adapter.set_last_price(closes[-1])
-			return closes
+			return ohlcv
 		finally:
 			try:
 				await client.close()
@@ -54,11 +45,13 @@ class Worker:
 		interval = float(self.settings.tick_interval_sec)
 		while not self._shutdown.is_set():
 			try:
-				closes = await self.fetch_closes(limit=max(self.settings.ema_slow + 5, 250))
-				if len(closes) < max(self.settings.ema_slow + 1, self.settings.rsi_period + 1):
+				ohlcv = await self.fetch_ohlcv(limit=max(self.settings.ema_slow + 5, 250))
+				if not ohlcv or len(ohlcv) < max(self.settings.ema_slow + 1, self.settings.rsi_period + 1):
 					await asyncio.sleep(interval)
 					continue
-				await run_tick(self.adapter, self.state, self.settings, closes)
+				closes = [float(c[4]) for c in ohlcv]
+				last_closed_ts = int(ohlcv[-1][0])
+				await run_tick(self.adapter, self.state, self.settings, closes, candle_ts=last_closed_ts)
 			except Exception as exc:  # noqa: BLE001
 				logger.exception(f"Worker tick error: {exc}")
 			await asyncio.sleep(interval)

@@ -18,8 +18,6 @@ class CcxtLBankAdapter(ExchangeAdapter):
 		})
 
 	async def connect(self) -> None:
-		# Warn about key permissions; we cannot check withdrawal perms via API reliably
-		# Validate we can load markets and fetch a public ticker
 		await self.exchange.load_markets()
 
 	async def close(self) -> None:  # type: ignore[override]
@@ -38,7 +36,6 @@ class CcxtLBankAdapter(ExchangeAdapter):
 		return await self.exchange.fetch_ticker(symbol)
 
 	async def create_market_buy_order(self, symbol: str, amount_quote: float) -> Dict[str, Any]:
-		# Convert quote amount to base amount using ticker price
 		ticker = await self.fetch_ticker(symbol)
 		price = float(ticker.get("last") or ticker.get("close"))
 		if price <= 0:
@@ -56,3 +53,24 @@ class CcxtLBankAdapter(ExchangeAdapter):
 		amount_decimals = market.get("precision", {}).get("amount", 8)
 		price_decimals = market.get("precision", {}).get("price", 8)
 		return amount_decimals, price_decimals
+
+	def get_market_rules(self, symbol: str) -> Dict[str, float]:
+		market = self.exchange.market(symbol)
+		limits = market.get("limits", {}) or {}
+		precision = market.get("precision", {}) or {}
+		min_cost = float((limits.get("cost") or {}).get("min") or 0.0)
+		min_amount = float((limits.get("amount") or {}).get("min") or 0.0)
+		price_decimals = int(precision.get("price", 8))
+		amount_decimals = int(precision.get("amount", 8))
+		return {
+			"min_cost": min_cost,
+			"min_amount": min_amount,
+			"price_decimals": float(price_decimals),
+			"amount_decimals": float(amount_decimals),
+		}
+
+	def round_amount(self, symbol: str, amount: float) -> float:
+		return float(self.exchange.amount_to_precision(symbol, amount))
+
+	def round_price(self, symbol: str, price: float) -> float:
+		return float(self.exchange.price_to_precision(symbol, price))

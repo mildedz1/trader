@@ -10,7 +10,7 @@ services:
       - EXCHANGE_ID=lbank
       - LBANK_API_KEY=${LBANK_API_KEY}
       - LBANK_API_SECRET=${LBANK_API_SECRET}
-      - SYMBOL=BTC/USDT
+      - SYMBOL=ETH/USDT
       - TIMEFRAME=1h
       - EMA_FAST=50
       - EMA_SLOW=200
@@ -18,11 +18,11 @@ services:
       - RSI_ENTRY=30
       - RSI_EXIT=70
       - TICK_INTERVAL_SEC=15
-      - RISK_POSITION_MODE=percent_of_balance
-      - RISK_POSITION_SIZE=0.01
+      - RISK_POSITION_MODE=fixed_amount
+      - RISK_POSITION_SIZE=1
       - MAX_DAILY_LOSS_PCT=3
       - RESET_HOUR_UTC=0
-      - MODE=demo
+      - MODE=live
       - CONFIG_PATH=/data/config.json
       - LOG_PATH=/data/logs/worker.log
       - HEARTBEAT_PATH=/data/heartbeat

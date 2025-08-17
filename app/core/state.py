@@ -3,14 +3,14 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 
 @dataclass
 class Position:
 	is_long: bool = False
 	entry_price: float = 0.0
-	quantity: float = 0.0  # base amount (e.g., BTC)
+	quantity: float = 0.0  # base amount (e.g., ETH)
 
 	def reset(self) -> None:
 		self.is_long = False
@@ -27,6 +27,14 @@ class WorkerState:
 	daily_pnl: float = 0.0
 	last_reset_day: Optional[int] = None
 	last_heartbeat_ts: float = 0.0
+
+	# Debounce / Cooldown / Lock
+	last_action_candle_ts: Optional[int] = None
+	cooldown_candles_remaining: int = 0
+	order_lock: bool = False
+
+	# Notifier (set by bot)
+	notify: Optional[Callable[[str], Awaitable[None]]] = None
 
 	def heartbeat(self, heartbeat_path: str) -> None:
 		self.last_heartbeat_ts = time.time()

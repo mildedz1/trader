@@ -28,6 +28,15 @@ class TelegramWorkerBot:
 		self.dp.message.register(self.cmd_config, Command(commands=["config"]))
 		self.dp.message.register(self.cmd_logs, Command(commands=["logs"]))
 
+		# Wire state notifier
+		async def _notify(text: str) -> None:
+			try:
+				for chat_id in self.settings.allowed_chat_ids:
+					await self.bot.send_message(chat_id, text)
+			except Exception:
+				pass
+		self.state.notify = _notify
+
 	def is_allowed(self, message: Message) -> bool:
 		user_id = message.from_user.id if message.from_user else 0
 		return int(user_id) in set(self.settings.allowed_chat_ids)
@@ -37,11 +46,12 @@ class TelegramWorkerBot:
 			return
 		intro = (
 			"LBank Spot Trader Worker\n"
-			"Use keys with Trade+Read only and WITHDRAWALS DISABLED.\n\n"
-			f"Mode: {self.settings.mode}\n"
+			"Mode: live-only (no demo). Use keys with Trade+Read only and WITHDRAWALS DISABLED.\n\n"
 			f"Symbol: {self.settings.symbol} Timeframe: {self.settings.timeframe}\n"
-			f"EMA: {self.settings.ema_fast}/{self.settings.ema_slow} RSI: {self.settings.rsi_period} entry={self.settings.rsi_entry} exit={self.settings.rsi_exit}\n"
-			f"Tick: {self.settings.tick_interval_sec}s Risk: {self.settings.risk_position_mode}={self.settings.risk_position_size}\n"
+			f"Strategy: {self.settings.strategy_id}\n"
+			f"Risk: fixed_amount={self.settings.risk_position_size} USDT (hard cap $1)\n"
+			f"EMA: {self.settings.ema_fast}/{self.settings.ema_slow} | RSI: {self.settings.rsi_period} entry={self.settings.rsi_entry} exit={self.settings.rsi_exit}\n"
+			f"BB: period={self.settings.bb_period} std={self.settings.bb_std} bw_pctl={self.settings.bb_bw_pctl} rsi_confirm={self.settings.rsi_confirm}\n"
 			f"MaxDailyLoss: {self.settings.max_daily_loss_pct}% ResetHourUTC: {self.settings.reset_hour_utc}\n"
 		)
 		await message.answer(intro)
@@ -53,8 +63,8 @@ class TelegramWorkerBot:
 		status = (
 			f"Paused: {self.state.is_paused}\n"
 			f"Last signal: {self.state.last_signal}\n"
-			f"Position: long={pos.is_long} qty={pos.quantity:.6f} entry={pos.entry_price:.2f}\n"
-			f"DailyPnL: {self.state.daily_pnl:.2f}\n"
+			f"Position: long={pos.is_long} qty={pos.quantity:.6f} entry={pos.entry_price:.4f}\n"
+			f"DailyPnL: {self.state.daily_pnl:.4f}\n"
 		)
 		await message.answer(status)
 
@@ -73,13 +83,12 @@ class TelegramWorkerBot:
 	async def cmd_config(self, message: Message) -> None:
 		if not self.is_allowed(message):
 			return
-		# Allow updating some runtime params via JSON payload after /config
 		parts = message.text.split(maxsplit=1) if message.text else []
 		if len(parts) == 2:
 			try:
 				payload = json.loads(parts[1])
 				self.settings.persist_overrides(payload)
-				await message.answer("Config updated and persisted. Restart container to fully apply.")
+				await message.answer("Config updated and persisted. Pause → change → Resume for strategy switch.")
 				return
 			except Exception as exc:  # noqa: BLE001
 				await message.answer(f"Invalid JSON: {exc}")
@@ -87,17 +96,23 @@ class TelegramWorkerBot:
 		cfg = {
 			"SYMBOL": self.settings.symbol,
 			"TIMEFRAME": self.settings.timeframe,
+			"STRATEGY_ID": self.settings.strategy_id,
+			"RISK_POSITION_MODE": self.settings.risk_position_mode,
+			"RISK_POSITION_SIZE": self.settings.risk_position_size,
+			"MAX_DAILY_LOSS_PCT": self.settings.max_daily_loss_pct,
+			"RESET_HOUR_UTC": self.settings.reset_hour_utc,
+			# ema_rsi
 			"EMA_FAST": self.settings.ema_fast,
 			"EMA_SLOW": self.settings.ema_slow,
 			"RSI_PERIOD": self.settings.rsi_period,
 			"RSI_ENTRY": self.settings.rsi_entry,
 			"RSI_EXIT": self.settings.rsi_exit,
-			"TICK_INTERVAL_SEC": self.settings.tick_interval_sec,
-			"RISK_POSITION_MODE": self.settings.risk_position_mode,
-			"RISK_POSITION_SIZE": self.settings.risk_position_size,
-			"MAX_DAILY_LOSS_PCT": self.settings.max_daily_loss_pct,
-			"RESET_HOUR_UTC": self.settings.reset_hour_utc,
-			"MODE": self.settings.mode,
+			# bb_breakout
+			"BB_PERIOD": self.settings.bb_period,
+			"BB_STD": self.settings.bb_std,
+			"BB_BW_LOOKBACK": self.settings.bb_bw_lookback,
+			"BB_BW_PCTL": self.settings.bb_bw_pctl,
+			"RSI_CONFIRM": self.settings.rsi_confirm,
 		}
 		await message.answer("Current config as JSON (send /config {json} to update):\n" + json.dumps(cfg, indent=2))
 

@@ -1,4 +1,4 @@
-from app.strategy.indicators import ema, rsi, crossed_up
+from app.strategy.indicators import ema, rsi, crossed_up, bollinger_bands, bb_bandwidth, percentile
 
 
 def test_ema_basic():
@@ -21,3 +21,13 @@ def test_crossed_up():
 	assert crossed_up(series, 30) is True
 	series = [35, 29, 29.5]
 	assert crossed_up(series, 30) is False
+
+
+def test_bollinger_helpers():
+	closes = [i for i in range(1, 250)]
+	upper, basis, lower = bollinger_bands(closes, 20, 2.0)
+	bw = bb_bandwidth(upper, basis, lower)
+	assert len(upper) == len(closes)
+	assert len(bw) == len(closes)
+	p20 = percentile(bw[-200:], 20)
+	assert p20 >= 0

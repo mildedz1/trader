@@ -17,20 +17,35 @@ class Settings(BaseModel):
 	lbank_api_key: Optional[str] = Field(default=None, alias="LBANK_API_KEY")
 	lbank_api_secret: Optional[str] = Field(default=None, alias="LBANK_API_SECRET")
 
-	# Trading
-	symbol: str = Field(default="BTC/USDT", alias="SYMBOL")
+	# Trading common
+	symbol: str = Field(default="ETH/USDT", alias="SYMBOL")
 	timeframe: str = Field(default="1h", alias="TIMEFRAME")
+	strategy_id: str = Field(default="ema_rsi", alias="STRATEGY_ID")  # ema_rsi | bb_breakout
+
+	# EMA/RSI strategy params
 	ema_fast: int = Field(default=50, alias="EMA_FAST")
 	ema_slow: int = Field(default=200, alias="EMA_SLOW")
 	rsi_period: int = Field(default=14, alias="RSI_PERIOD")
 	rsi_entry: float = Field(default=30, alias="RSI_ENTRY")
 	rsi_exit: float = Field(default=70, alias="RSI_EXIT")
+
+	# BB breakout params
+	bb_period: int = Field(default=20, alias="BB_PERIOD")
+	bb_std: float = Field(default=2.0, alias="BB_STD")
+	bb_bw_lookback: int = Field(default=200, alias="BB_BW_LOOKBACK")
+	bb_bw_pctl: float = Field(default=20.0, alias="BB_BW_PCTL")
+	rsi_confirm: float = Field(default=50.0, alias="RSI_CONFIRM")
+
+	# Risk & loop
 	tick_interval_sec: float = Field(default=15.0, alias="TICK_INTERVAL_SEC")
-	risk_position_mode: str = Field(default="percent_of_balance", alias="RISK_POSITION_MODE")
-	risk_position_size: float = Field(default=0.01, alias="RISK_POSITION_SIZE")
+	risk_position_mode: str = Field(default="fixed_amount", alias="RISK_POSITION_MODE")
+	risk_position_size: float = Field(default=1.0, alias="RISK_POSITION_SIZE")  # USDT
 	max_daily_loss_pct: float = Field(default=3.0, alias="MAX_DAILY_LOSS_PCT")
 	reset_hour_utc: int = Field(default=0, alias="RESET_HOUR_UTC")
-	mode: str = Field(default="demo", alias="MODE")  # "demo" or "live"
+	cooldown_candles_after_exit: int = Field(default=0, alias="COOLDOWN_CANDLES_AFTER_EXIT")
+
+	# Mode (live-only)
+	mode: str = Field(default="live", alias="MODE")
 
 	# Persistence & logs
 	config_path: str = Field(default="/data/config.json", alias="CONFIG_PATH")
@@ -49,17 +64,24 @@ class Settings(BaseModel):
 	@field_validator("risk_position_mode")
 	@classmethod
 	def validate_risk_mode(cls, v: str):
-		allowed = {"percent_of_balance", "fixed_amount"}
+		allowed = {"fixed_amount"}
 		if v not in allowed:
-			raise ValueError(f"RISK_POSITION_MODE must be one of {allowed}")
+			raise ValueError(f"RISK_POSITION_MODE must be one of {allowed} for live-only mode")
 		return v
 
 	@field_validator("mode")
 	@classmethod
 	def validate_mode(cls, v: str):
-		allowed = {"demo", "live"}
+		if v != "live":
+			raise ValueError("Only live mode is supported (no demo/paper)")
+		return v
+
+	@field_validator("strategy_id")
+	@classmethod
+	def validate_strategy_id(cls, v: str):
+		allowed = {"ema_rsi", "bb_breakout"}
 		if v not in allowed:
-			raise ValueError(f"MODE must be one of {allowed}")
+			raise ValueError(f"STRATEGY_ID must be one of {allowed}")
 		return v
 
 	@classmethod
