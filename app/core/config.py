@@ -31,7 +31,7 @@ class Settings(BaseModel):
 	rsi_confirm: bool = Field(default=False, alias="RSI_CONFIRM")
 	rsi_confirm_level: float = Field(default=45.0, alias="RSI_CONFIRM_LEVEL")
 
-	# Futures trading (futures_supertrend_macd)
+	# Futures trading (futures_scalp_st)
 	futures_symbol: str = Field(default="ETH/USDT", alias="FUTURES_SYMBOL")
 	futures_timeframe: str = Field(default="5m", alias="FUTURES_TIMEFRAME")
 	futures_leverage: int = Field(default=5, alias="FUTURES_LEVERAGE")
@@ -39,8 +39,9 @@ class Settings(BaseModel):
 	futures_max_positions: int = Field(default=1, alias="FUTURES_MAX_POSITIONS")
 	futures_allow_short: bool = Field(default=True, alias="FUTURES_ALLOW_SHORT")
 	futures_testnet: bool = Field(default=False, alias="FUTURES_TESTNET")
-	st_supertrend_atr_period: int = Field(default=10, alias="ST_SUPERTREND_ATR_PERIOD")
-	st_supertrend_atr_mult: float = Field(default=2.5, alias="ST_SUPERTREND_ATR_MULT")
+	st_supertrend_atr_period: int = Field(default=10, alias="ST_ATR_PERIOD")
+	st_supertrend_atr_mult: float = Field(default=2.5, alias="ST_ATR_MULT")
+	# For futures scalp, override default EMAs faster
 	ema_fast: int = Field(default=20, alias="EMA_FAST")
 	ema_slow: int = Field(default=50, alias="EMA_SLOW")
 	sl_atr_mult: float = Field(default=1.0, alias="SL_ATR_MULT")
@@ -58,7 +59,6 @@ class Settings(BaseModel):
 	risk_position_size: float = Field(default=1.0, alias="RISK_POSITION_SIZE")  # USDT for spot
 	max_daily_loss_pct: float = Field(default=3.0, alias="MAX_DAILY_LOSS_PCT")
 	reset_hour_utc: int = Field(default=0, alias="RESET_HOUR_UTC")
-	cooldown_candles_after_exit: int = Field(default=1, alias="COOLDOWN_CANDLES_AFTER_EXIT")
 
 	# Mode (live-only)
 	mode: str = Field(default="live", alias="MODE")
