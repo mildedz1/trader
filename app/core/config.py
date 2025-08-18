@@ -54,6 +54,8 @@ class Settings(BaseModel):
 	max_trades_per_day: int = Field(default=50, alias="MAX_TRADES_PER_DAY")
 	min_seconds_between_trades: int = Field(default=30, alias="MIN_SECONDS_BETWEEN_TRADES")
 	use_full_balance: bool = Field(default=True, alias="USE_FULL_BALANCE")
+	# Optional explicit futures margin per trade (USDT); if set, overrides USE_FULL_BALANCE sizing for manual and strategy
+	futures_margin_usdt: Optional[float] = Field(default=None, alias="FUTURES_MARGIN_USDT")
 
 	# Risk & loop
 	tick_interval_sec: float = Field(default=15.0, alias="TICK_INTERVAL_SEC")

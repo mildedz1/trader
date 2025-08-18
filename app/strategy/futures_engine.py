@@ -185,13 +185,13 @@ async def run_tick_futures(adapter: ExchangeAdapter, state: WorkerState, fstate:
 			return {"status": "locked"}
 		state.order_lock = True
 		try:
-			# Sizing using full balance
+			# Sizing: prefer explicit FUTURES_MARGIN_USDT if provided
 			bal = await adapter.fetch_balance()
 			usdt = float((bal.get("free") or {}).get("USDT", 0.0))
-			if settings.use_full_balance:
-				margin_usdt = usdt
+			if getattr(settings, 'futures_margin_usdt', None):
+				margin_usdt = min(float(settings.futures_margin_usdt or 0.0), usdt)
 			else:
-				margin_usdt = usdt * 0.2
+				margin_usdt = usdt if settings.use_full_balance else usdt * 0.2
 			# leverage effect: base size = (margin * leverage) / price
 			base_size = (margin_usdt * float(settings.futures_leverage)) / max(price, 1e-8)
 			if base_size <= 0:

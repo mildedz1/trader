@@ -488,7 +488,10 @@ class Worker:
 						except Exception:
 							price = float(self.state.last_price or 0.0)
 					lev = float(getattr(self.settings, "futures_leverage", 1))
-					margin_usdt = usdt if getattr(self.settings, "use_full_balance", True) else min(usdt, 1.0)
+					if getattr(self.settings, 'futures_margin_usdt', None):
+						margin_usdt = min(float(self.settings.futures_margin_usdt or 0.0), usdt)
+					else:
+						margin_usdt = usdt if getattr(self.settings, "use_full_balance", True) else min(usdt, 1.0)
 					base_size = (margin_usdt * lev) / max(price, 1e-8)
 					if hasattr(self.adapter, "round_amount"):
 						base_size = self.adapter.round_amount(sym, base_size)  # type: ignore[attr-defined]
@@ -543,7 +546,10 @@ class Worker:
 						return 0.0
 				usdt = _amt(bal)
 				lev = float(getattr(self.settings, "futures_leverage", 1))
-				margin_usdt = usdt if getattr(self.settings, "use_full_balance", True) else min(usdt, 1.0)
+				if getattr(self.settings, 'futures_margin_usdt', None):
+					margin_usdt = min(float(self.settings.futures_margin_usdt or 0.0), usdt)
+				else:
+					margin_usdt = usdt if getattr(self.settings, "use_full_balance", True) else min(usdt, 1.0)
 				base_size = (margin_usdt * lev) / max(price, 1e-8)
 				if hasattr(self.adapter, "round_amount"):
 					base_size = self.adapter.round_amount(sym, base_size)  # type: ignore[attr-defined]
