@@ -68,18 +68,28 @@ class Worker:
 			bal = await self.adapter.fetch_balance()
 			sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
 			base_ccy, quote_ccy = sym.split("/")
+			def _amount_from_balance(b: dict, code: str, which: str = "free") -> float:
+				try:
+					# prefer top-level mapping
+					m = b.get(which) or {}
+					if code in m:
+						return float(m.get(code, 0.0))
+					# ccxt style per-currency dict
+					c = b.get(code) or {}
+					val = c.get(which) or c.get("total") or c.get("free") or 0.0
+					return float(val)
+				except Exception:
+					return 0.0
 			if self.settings.trade_mode == "futures":
-				free = bal.get("free") or bal.get("total") or {}
-				usdt = float(free.get("USDT", 0.0))
+				usdt = _amount_from_balance(bal, "USDT", "free")
 				lines = [
 					"حساب فیوچرز (USDT-M):",
 					f"مارجین USDT (در دسترس): {usdt:.4f}",
 				]
 				return "\n".join(lines)
 			else:
-				free = bal.get("free") or bal.get("total") or {}
-				base = float(free.get(base_ccy, 0.0))
-				usdt = float(free.get(quote_ccy, 0.0))
+				base = _amount_from_balance(bal, base_ccy, "free")
+				usdt = _amount_from_balance(bal, quote_ccy, "free")
 				ticker = await self.adapter.fetch_ticker(sym)
 				price = float(ticker.get("last") or ticker.get("close") or 0.0)
 				equity = usdt + base * price
@@ -204,7 +214,17 @@ class Worker:
 					# Futures or fallback to ccxt spot
 					if self.settings.trade_mode == "futures":
 						bal = await self.adapter.fetch_balance()
-						usdt_free = float((bal.get("free") or {}).get("USDT", 0.0))
+						def _amount_from_balance(b: dict, code: str, which: str = "free") -> float:
+							try:
+								m = b.get(which) or {}
+								if code in m:
+									return float(m.get(code, 0.0))
+								c = b.get(code) or {}
+								val = c.get(which) or c.get("total") or c.get("free") or 0.0
+								return float(val)
+							except Exception:
+								return 0.0
+						usdt_free = _amount_from_balance(bal, "USDT", "free")
 						ticker = await self.adapter.fetch_ticker(sym)
 						price = float(ticker.get("last") or ticker.get("close") or 0.0)
 						lev = float(getattr(self.settings, "futures_leverage", 1))
