@@ -11,6 +11,7 @@ from .core.logging import setup_logging
 from .core.state import WorkerState
 from .exchange_adapter.ccxt_lbank import CcxtLBankAdapter
 from .exchange_adapter.lbank_futures import CcxtLBankFuturesAdapter
+from .exchange_adapter.lbank_native import LBankNativeSpotClient
 from .strategy.logic import run_tick
 import ccxt.async_support as ccxt  # keep import for runtime
 
@@ -21,6 +22,7 @@ class Worker:
 		self.state = WorkerState()
 		self._shutdown = asyncio.Event()
 		self.adapter = None
+		self.native_spot: LBankNativeSpotClient | None = None
 
 	async def startup(self) -> None:
 		logger.info("Use LBank API keys with Trade+Read only and Withdrawals disabled.")
@@ -32,6 +34,10 @@ class Worker:
 		else:
 			self.adapter = CcxtLBankAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
 		await self.adapter.connect()
+		# Prepare native spot client for robust spot orders
+		if self.settings.trade_mode == "spot":
+			self.native_spot = LBankNativeSpotClient(self.settings.lbank_api_key, self.settings.lbank_api_secret)
+			await self.native_spot.connect()
 		logger.info("Connected to exchange adapter")
 
 		async def balance_provider() -> str:
@@ -141,14 +147,20 @@ class Worker:
 			try:
 				bal = await self.adapter.fetch_balance()
 				sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
-				ticker = await self.adapter.fetch_ticker(sym)
-				price = float(ticker.get("last") or ticker.get("close") or 0.0)
-				from .strategy.logic import compute_position_size_usdt_capped
-				amount_base_cap, amount_quote_cap = await compute_position_size_usdt_capped(self.adapter, self.settings, price)
-				if amount_quote_cap <= 0 or amount_base_cap <= 0:
-					return "امکان خرید نیست: موجودی/سایز ناکافی"
-				order = await self.adapter.create_market_buy_order(sym, amount_quote_cap)
-				return f"خرید دستی انجام شد: {order}"
+				if self.settings.trade_mode == "spot" and self.native_spot is not None:
+					# Use native REST spot order
+					order = await self.native_spot.create_market_buy_quote(sym, 1.0)  # hard cap 1 USDT
+					return f"خرید دستی (Spot/Native) انجام شد: {order}"
+				else:
+					# Futures or fallback to ccxt
+					ticker = await self.adapter.fetch_ticker(sym)
+					price = float(ticker.get("last") or ticker.get("close") or 0.0)
+					from .strategy.logic import compute_position_size_usdt_capped
+					amount_base_cap, amount_quote_cap = await compute_position_size_usdt_capped(self.adapter, self.settings, price)
+					if amount_quote_cap <= 0 or amount_base_cap <= 0:
+						return "امکان خرید نیست: موجودی/سایز ناکافی"
+					order = await self.adapter.create_market_buy_order(sym, amount_quote_cap)
+					return f"خرید دستی انجام شد: {order}"
 			except Exception as exc:
 				return f"خرید دستی ناموفق بود: {exc}"
 
@@ -156,17 +168,29 @@ class Worker:
 			try:
 				bal = await self.adapter.fetch_balance()
 				sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
-				base_ccy = sym.split("/")[0]
-				base = float((bal.get("free") or bal.get("total") or {}).get(base_ccy, 0.0))
-				if base <= 0:
-					return "هیچ پوزیشن/موجودی برای فروش وجود ندارد"
-				ticker = await self.adapter.fetch_ticker(sym)
-				price = float(ticker.get("last") or ticker.get("close") or 0.0)
-				# ریسک: فروش با سقف 1 USDT معادل
-				notional = min(base * price, 1.0)
-				amount_to_sell = notional / price if price > 0 else 0.0
-				order = await self.adapter.create_market_sell_order(sym, amount_to_sell)
-				return f"فروش دستی انجام شد: {order}"
+				if self.settings.trade_mode == "spot" and self.native_spot is not None:
+					# Native spot sell by base amount up to ~1 USDT
+					base_ccy = sym.split("/")[0]
+					base = float((bal.get("free") or bal.get("total") or {}).get(base_ccy, 0.0))
+					if base <= 0:
+						return "هیچ پوزیشن/موجودی برای فروش وجود ندارد"
+					# sell up to 1 USDT notional
+					price = await self.native_spot.ticker_price(sym)
+					notional = min(base * price, 1.0)
+					amount_to_sell = notional / price if price > 0 else 0.0
+					order = await self.native_spot.create_market_sell_base(sym, amount_to_sell)
+					return f"فروش دستی (Spot/Native) انجام شد: {order}"
+				else:
+					base_ccy = sym.split("/")[0]
+					base = float((bal.get("free") or bal.get("total") or {}).get(base_ccy, 0.0))
+					if base <= 0:
+						return "هیچ پوزیشن/موجودی برای فروش وجود ندارد"
+					ticker = await self.adapter.fetch_ticker(sym)
+					price = float(ticker.get("last") or ticker.get("close") or 0.0)
+					notional = min(base * price, 1.0)
+					amount_to_sell = notional / price if price > 0 else 0.0
+					order = await self.adapter.create_market_sell_order(sym, amount_to_sell)
+					return f"فروش دستی انجام شد: {order}"
 			except Exception as exc:
 				return f"فروش دستی ناموفق بود: {exc}"
 
@@ -209,6 +233,8 @@ class Worker:
 		try:
 			if self.adapter:
 				await self.adapter.close()
+			if self.native_spot:
+				await self.native_spot.close()
 		except Exception:
 			pass
 
