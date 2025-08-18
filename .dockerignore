@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.sqlite
+.env
+.git
+.gitignore
+.data
+.cache
+.vscode
+.idea
+node_modules
+.data
+/tests/__pycache__
