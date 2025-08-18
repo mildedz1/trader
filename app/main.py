@@ -15,6 +15,7 @@ from .exchange_adapter.lbank_native import LBankNativeSpotClient
 from .exchange_adapter.lbank_spot_native_adapter import LBankNativeSpotAdapter
 from .exchange_adapter.lbank_futures_native import LBankNativeFuturesAdapter
 from .strategy.logic import run_tick
+from .strategy.futures_engine import run_tick_futures, FuturesState, FuturesPosition
 import ccxt.async_support as ccxt  # keep import for runtime
 
 
@@ -25,6 +26,7 @@ class Worker:
 		self._shutdown = asyncio.Event()
 		self.adapter = None
 		self.native_spot: LBankNativeSpotClient | None = None
+		self.fstate: FuturesState | None = None
 
 	async def startup(self) -> None:
 		logger.info("Use LBank API keys with Trade+Read only and Withdrawals disabled.")
@@ -46,52 +48,92 @@ class Worker:
 		if self.settings.trade_mode == "spot" and self.settings.lbank_use_native_spot:
 			self.native_spot = LBankNativeSpotClient(self.settings.lbank_api_key, self.settings.lbank_api_secret)
 			await self.native_spot.connect()
+		# Initialize futures runtime state and try leverage/margin mode
+		if self.settings.trade_mode == "futures":
+			self.fstate = FuturesState(position=FuturesPosition())
+			# Best-effort leverage/margin settings
+			try:
+				if hasattr(self.adapter, "set_leverage"):
+					await self.adapter.set_leverage(self.settings.futures_symbol, int(self.settings.futures_leverage))  # type: ignore[attr-defined]
+			except Exception:
+				pass
+			try:
+				if hasattr(self.adapter, "set_position_mode"):
+					await self.adapter.set_position_mode(self.settings.futures_symbol, str(self.settings.futures_position_mode))  # type: ignore[attr-defined]
+			except Exception:
+				pass
 		logger.info("Connected to exchange adapter")
 
 		async def balance_provider() -> str:
 			bal = await self.adapter.fetch_balance()
-			free = bal.get("free") or bal.get("total") or {}
 			sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
 			base_ccy, quote_ccy = sym.split("/")
-			base = float(free.get(base_ccy, 0.0))
-			usdt = float(free.get(quote_ccy, 0.0))
-			ticker = await self.adapter.fetch_ticker(sym)
-			price = float(ticker.get("last") or ticker.get("close") or 0.0)
-			equity = usdt + base * price
-			ready_buy = usdt >= 1.0
-			ready_sell = base * price >= 0.01  # arbitrary tiny threshold
-			lines = [
-				f"موجودی {quote_ccy}: {usdt:.4f}",
-				f"موجودی {base_ccy}: {base:.8f}",
-				f"قیمت {sym}: {price:.4f}",
-				f"اکویتی تقریبی: {equity:.4f} USDT",
-				f"آمادگی خرید (≤ 1 USDT): {'بله' if ready_buy else 'خیر'}",
-				f"آمادگی فروش (≤ 1 USDT معادل): {'بله' if ready_sell else 'خیر'}",
-			]
-			return "\n".join(lines)
+			if self.settings.trade_mode == "futures":
+				free = bal.get("free") or bal.get("total") or {}
+				usdt = float(free.get("USDT", 0.0))
+				lines = [
+					"حساب فیوچرز (USDT-M):",
+					f"مارجین USDT (در دسترس): {usdt:.4f}",
+				]
+				return "\n".join(lines)
+			else:
+				free = bal.get("free") or bal.get("total") or {}
+				base = float(free.get(base_ccy, 0.0))
+				usdt = float(free.get(quote_ccy, 0.0))
+				ticker = await self.adapter.fetch_ticker(sym)
+				price = float(ticker.get("last") or ticker.get("close") or 0.0)
+				equity = usdt + base * price
+				ready_buy = usdt >= 1.0
+				ready_sell = base * price >= 0.01
+				lines = [
+					"حساب اسپات:",
+					f"موجودی {quote_ccy}: {usdt:.4f}",
+					f"موجودی {base_ccy}: {base:.8f}",
+					f"قیمت {sym}: {price:.4f}",
+					f"اکویتی تقریبی: {equity:.4f} USDT",
+					f"آمادگی خرید (≤ 1 USDT): {'بله' if ready_buy else 'خیر'}",
+					f"آمادگی فروش (≤ 1 USDT معادل): {'بله' if ready_sell else 'خیر'}",
+				]
+				return "\n".join(lines)
 
 		self.state.balance_provider = balance_provider
 
 		async def position_overview() -> str:
 			sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
-			base_ccy, quote_ccy = sym.split("/")
-			bal = await self.adapter.fetch_balance()
-			free = bal.get("free") or bal.get("total") or {}
-			base = float(free.get(base_ccy, 0.0))
-			usdt = float(free.get(quote_ccy, 0.0))
+			base_ccy, _ = sym.split("/")
 			ticker = await self.adapter.fetch_ticker(sym)
 			price = float(ticker.get("last") or ticker.get("close") or 0.0)
-			pnl = 0.0
-			if self.state.position.is_long and self.state.position.quantity > 0 and self.state.position.entry_price > 0:
-				pnl = (price - self.state.position.entry_price) * self.state.position.quantity
-			lines = [
-				"سفارش/پوزیشن فعلی:",
-				f"- لانگ: {self.state.position.is_long}",
-				f"- مقدار: {self.state.position.quantity:.6f} {base_ccy}",
-				f"- قیمت ورود: {self.state.position.entry_price:.4f}",
-				f"- قیمت فعلی: {price:.4f}",
-				f"- PnL تقریبی: {pnl:.4f} USDT",
-			]
+			lines: list[str] = []
+			if self.settings.trade_mode == "futures" and self.fstate is not None:
+				pos = self.fstate.position
+				pnl = 0.0
+				if pos.size_base > 0 and pos.entry_price > 0:
+					if pos.is_long:
+						pnl = (price - pos.entry_price) * pos.size_base
+					else:
+						pnl = (pos.entry_price - price) * pos.size_base
+				lines = [
+					"پوزیشن فیوچرز:",
+					f"- لانگ: {pos.is_long}",
+					f"- شورت: {pos.is_short}",
+					f"- اندازه: {pos.size_base:.6f} {base_ccy}",
+					f"- قیمت ورود: {pos.entry_price:.4f}",
+					f"- SL/TP: {pos.sl:.4f} / {pos.tp:.4f}",
+					f"- قیمت فعلی: {price:.4f}",
+					f"- PnL تقریبی: {pnl:.4f} USDT",
+				]
+			else:
+				pnl = 0.0
+				if self.state.position.is_long and self.state.position.quantity > 0 and self.state.position.entry_price > 0:
+					pnl = (price - self.state.position.entry_price) * self.state.position.quantity
+				lines = [
+					"سفارش/پوزیشن اسپات:",
+					f"- لانگ: {self.state.position.is_long}",
+					f"- مقدار: {self.state.position.quantity:.6f} {base_ccy}",
+					f"- قیمت ورود: {self.state.position.entry_price:.4f}",
+					f"- قیمت فعلی: {price:.4f}",
+					f"- PnL تقریبی: {pnl:.4f} USDT",
+				]
 			# Also list open orders on the symbol (if any)
 			try:
 				orders = await self.adapter.fetch_open_orders(sym)
@@ -207,10 +249,10 @@ class Worker:
 
 		async def manual_close() -> str:
 			try:
-				bal = await self.adapter.fetch_balance()
 				sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
 				if self.settings.trade_mode == "spot" and self.native_spot is not None:
 					# Native spot sell by base amount up to ~1 USDT
+					bal = await self.adapter.fetch_balance()
 					base_ccy = sym.split("/")[0]
 					base = float((bal.get("free") or bal.get("total") or {}).get(base_ccy, 0.0))
 					if base <= 0:
@@ -222,6 +264,29 @@ class Worker:
 					order = await self.native_spot.create_market_sell_base(sym, amount_to_sell)
 					return f"فروش دستی (Spot/Native) انجام شد: {order}"
 				else:
+					if self.settings.trade_mode == "futures" and self.fstate is not None and not self.fstate.position.flat():
+						pos = self.fstate.position
+						amt = pos.size_base
+						if amt <= 0:
+							return "پوزیشنی برای بستن وجود ندارد"
+						# Close with opposite side reduce-only if available
+						if hasattr(self.adapter, "create_market_order"):
+							side = "sell" if pos.is_long else "buy"
+							order = await self.adapter.create_market_order(sym, side, amt, reduce_only=True)  # type: ignore[attr-defined]
+							pos.reset()
+							return f"بستن دستی فیوچرز انجام شد: {order}"
+						# Fallback: emulate
+						if pos.is_long:
+							order = await self.adapter.create_market_sell_order(sym, amt)
+						else:
+							# buy requires quote; approximate using ticker
+							ticker = await self.adapter.fetch_ticker(sym)
+							price = float(ticker.get("last") or ticker.get("close") or 0.0)
+							order = await self.adapter.create_market_buy_order(sym, amt * price)
+						pos.reset()
+						return f"بستن دستی فیوچرز انجام شد: {order}"
+					# Spot ccxt fallback
+					bal = await self.adapter.fetch_balance()
 					base_ccy = sym.split("/")[0]
 					base = float((bal.get("free") or bal.get("total") or {}).get(base_ccy, 0.0))
 					if base <= 0:
@@ -264,7 +329,10 @@ class Worker:
 					continue
 				closes = [float(c[4]) for c in ohlcv]
 				last_closed_ts = int(ohlcv[-1][0])
-				await run_tick(self.adapter, self.state, self.settings, closes, candle_ts=last_closed_ts)
+				if self.settings.trade_mode == "futures" and self.fstate is not None:
+					await run_tick_futures(self.adapter, self.state, self.fstate, self.settings, ohlcv, candle_ts=last_closed_ts)
+				else:
+					await run_tick(self.adapter, self.state, self.settings, closes, candle_ts=last_closed_ts)
 			except Exception as exc:  # noqa: BLE001
 				logger.exception(f"Worker tick error: {exc}")
 			await asyncio.sleep(interval)
