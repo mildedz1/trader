@@ -65,46 +65,102 @@ class Worker:
 		logger.info("Connected to exchange adapter")
 
 		async def balance_provider() -> str:
-			bal = await self.adapter.fetch_balance()
-			sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
-			base_ccy, quote_ccy = sym.split("/")
+			# Helpers
 			def _amount_from_balance(b: dict, code: str, which: str = "free") -> float:
 				try:
-					# prefer top-level mapping
+					# prefer top-level mapping (ccxt normalized)
 					m = b.get(which) or {}
-					if code in m:
+					if isinstance(m, dict) and code in m:
 						return float(m.get(code, 0.0))
-					# ccxt style per-currency dict
+					# per-currency dict (ccxt)
 					c = b.get(code) or {}
-					val = c.get(which) or c.get("total") or c.get("free") or 0.0
-					return float(val)
+					val = c.get(which) or c.get("total") or c.get("free")
+					if val is not None:
+						return float(val)
+					# native spot supplement
+					if "can_use" in b and isinstance(b["can_use"], dict):
+						v = b["can_use"].get(code)
+						if v is not None:
+							return float(v)
+					if "asset" in b and isinstance(b["asset"], dict):
+						v = b["asset"].get(code)
+						if v is not None:
+							return float(v)
+					return 0.0
 				except Exception:
 					return 0.0
-			if self.settings.trade_mode == "futures":
-				usdt = _amount_from_balance(bal, "USDT", "free")
-				lines = [
-					"حساب فیوچرز (USDT-M):",
-					f"مارجین USDT (در دسترس): {usdt:.4f}",
-				]
-				return "\n".join(lines)
-			else:
-				base = _amount_from_balance(bal, base_ccy, "free")
-				usdt = _amount_from_balance(bal, quote_ccy, "free")
-				ticker = await self.adapter.fetch_ticker(sym)
-				price = float(ticker.get("last") or ticker.get("close") or 0.0)
-				equity = usdt + base * price
-				ready_buy = usdt >= 1.0
-				ready_sell = base * price >= 0.01
-				lines = [
+
+			# Build Spot section
+			spot_lines: list[str] = []
+			try:
+				spot_sym = self.settings.symbol
+				base_ccy, quote_ccy = spot_sym.split("/")
+				spot_bal: dict
+				spot_price = 0.0
+				if self.native_spot is not None:
+					spot_bal = await self.native_spot.fetch_balance()
+					spot_price = await self.native_spot.ticker_price(spot_sym)
+				else:
+					# use a temporary ccxt spot client
+					import ccxt.async_support as _ccxt
+					client = _ccxt.lbank({
+						"apiKey": self.settings.lbank_api_key or "",
+						"secret": self.settings.lbank_api_secret or "",
+						"enableRateLimit": True,
+						"options": {"defaultType": "spot"},
+					})
+					try:
+						await client.load_markets()
+						spot_bal = await client.fetch_balance()
+						t = await client.fetch_ticker(spot_sym)
+						spot_price = float(t.get("last") or t.get("close") or 0.0)
+					finally:
+						try:
+							await client.close()
+						except Exception:
+							pass
+				spot_base = _amount_from_balance(spot_bal, base_ccy, "free")
+				spot_usdt = _amount_from_balance(spot_bal, quote_ccy, "free")
+				spot_equity = spot_usdt + spot_base * spot_price
+				spot_lines = [
 					"حساب اسپات:",
-					f"موجودی {quote_ccy}: {usdt:.4f}",
-					f"موجودی {base_ccy}: {base:.8f}",
-					f"قیمت {sym}: {price:.4f}",
-					f"اکویتی تقریبی: {equity:.4f} USDT",
-					f"آمادگی خرید (≤ 1 USDT): {'بله' if ready_buy else 'خیر'}",
-					f"آمادگی فروش (≤ 1 USDT معادل): {'بله' if ready_sell else 'خیر'}",
+					f"موجودی {quote_ccy}: {spot_usdt:.4f}",
+					f"موجودی {base_ccy}: {spot_base:.8f}",
+					f"قیمت {spot_sym}: {spot_price:.4f}",
+					f"اکویتی تقریبی: {spot_equity:.4f} USDT",
 				]
-				return "\n".join(lines)
+			except Exception:
+				pass
+
+			# Build Futures section
+			fut_lines: list[str] = []
+			try:
+				fut_sym = self.settings.futures_symbol
+				# use a temporary ccxt futures client to avoid mixing
+				import ccxt.async_support as _ccxt
+				client = _ccxt.lbank({
+					"apiKey": self.settings.lbank_api_key or "",
+					"secret": self.settings.lbank_api_secret or "",
+					"enableRateLimit": True,
+					"options": {"defaultType": "swap"},
+				})
+				try:
+					await client.load_markets()
+					fut_bal = await client.fetch_balance()
+				finally:
+					try:
+						await client.close()
+					except Exception:
+						pass
+				f_usdt = _amount_from_balance(fut_bal, "USDT", "free")
+				fut_lines = [
+					"حساب فیوچرز (USDT-M):",
+					f"مارجین USDT (در دسترس): {f_usdt:.4f}",
+				]
+			except Exception:
+				pass
+
+			return "\n".join([*spot_lines, "", *fut_lines]).strip()
 
 		self.state.balance_provider = balance_provider
 
