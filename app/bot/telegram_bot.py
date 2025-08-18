@@ -266,8 +266,16 @@ class TelegramWorkerBot:
 		if len(parts) == 2:
 			try:
 				payload = json.loads(parts[1])
+				# Compute which keys will be accepted (by alias) and echo them back
+				allowed_aliases = {f.alias for f in self.settings.model_fields.values()}
+				applied = {k: payload[k] for k in payload.keys() if k in allowed_aliases}
+				ignored = [k for k in payload.keys() if k not in allowed_aliases]
 				self.settings.persist_overrides(payload)
 				await message.answer("تنظیمات به‌روزرسانی و ذخیره شد.", reply_markup=self.main_menu())
+				if applied:
+					await message.answer("کلیدهای ثبت‌شده:\n" + json.dumps(applied, ensure_ascii=False, indent=2))
+				if ignored:
+					await message.answer("کلیدهای نادیده‌گرفته‌شده (ناشناخته):\n" + ", ".join(ignored))
 				return
 			except Exception as exc:  # noqa: BLE001
 				await message.answer(f"فرمت JSON نامعتبر است: {exc}", reply_markup=self.main_menu())
