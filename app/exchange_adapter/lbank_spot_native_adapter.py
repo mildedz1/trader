@@ -4,23 +4,44 @@ from typing import Any, Dict, List, Tuple
 
 from .base import ExchangeAdapter
 from .lbank_native import LBankNativeSpotClient
+import ccxt.async_support as ccxt  # type: ignore
 
 
 class LBankNativeSpotAdapter(ExchangeAdapter):
 	def __init__(self, api_key: str | None, api_secret: str | None):
 		self.client = LBankNativeSpotClient(api_key or "", api_secret or "")
+		self._ccxt_spot = ccxt.lbank({
+			"apiKey": api_key or "",
+			"secret": api_secret or "",
+			"enableRateLimit": True,
+			"options": {"defaultType": "spot"},
+		})
 
 	async def connect(self) -> None:
 		await self.client.connect()
+		try:
+			await self._ccxt_spot.load_markets(reload=False)
+		except Exception:
+			await self._ccxt_spot.load_markets()
 
 	async def close(self) -> None:
 		await self.client.close()
+		try:
+			await self._ccxt_spot.close()
+		except Exception:
+			pass
 
 	def _symbol(self, symbol: str) -> str:
 		return symbol
 
 	async def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 300) -> List[List[float]]:
-		return await self.client.fetch_ohlcv(symbol, timeframe, limit)
+		data = await self.client.fetch_ohlcv(symbol, timeframe, limit)
+		if data:
+			return data
+		try:
+			return await self._ccxt_spot.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+		except Exception:
+			return []
 
 	async def fetch_balance(self) -> Dict[str, Any]:
 		# Normalize to {"free": {asset: float}, "total": {asset: float}}
