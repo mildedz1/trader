@@ -136,26 +136,54 @@ class Worker:
 			fut_lines: list[str] = []
 			try:
 				fut_sym = self.settings.futures_symbol
-				# use a temporary ccxt futures client to avoid mixing
-				import ccxt.async_support as _ccxt
-				client = _ccxt.lbank({
-					"apiKey": self.settings.lbank_api_key or "",
-					"secret": self.settings.lbank_api_secret or "",
-					"enableRateLimit": True,
-					"options": {"defaultType": "swap"},
-				})
-				try:
-					await client.load_markets()
-					fut_bal = await client.fetch_balance()
-				finally:
+				# prefer native futures client if enabled
+				f_usdt = None
+				if getattr(self.settings, "lbank_use_native_futures", False):
+					from .exchange_adapter.lbank_futures_native import LBankNativeFuturesClient as _NF
+					nfc = _NF(self.settings.lbank_api_key or "", self.settings.lbank_api_secret or "")
+					await nfc.connect()
 					try:
-						await client.close()
-					except Exception:
-						pass
-				f_usdt = _amount_from_balance(fut_bal, "USDT", "free")
+						acc = await nfc.account_balance(asset="USDT", product_group="SwapU")
+						# Expect { data: {available: ...} } or similar; try common fields
+						data = acc.get("data") if isinstance(acc, dict) else acc
+						if isinstance(data, dict):
+							f_usdt = float(data.get("available") or data.get("avail") or data.get("equity") or 0.0)
+					finally:
+						try:
+							await nfc.close()
+						except Exception:
+							pass
+				if f_usdt is None:
+					# fallback ccxt futures client
+					import ccxt.async_support as _ccxt
+					client = _ccxt.lbank({
+						"apiKey": self.settings.lbank_api_key or "",
+						"secret": self.settings.lbank_api_secret or "",
+						"enableRateLimit": True,
+						"options": {"defaultType": "swap"},
+					})
+					try:
+						await client.load_markets()
+						fut_bal = await client.fetch_balance()
+						def _amount_from_balance(b: dict, code: str, which: str = "free") -> float:
+							try:
+								m = b.get(which) or {}
+								if code in m:
+									return float(m.get(code, 0.0))
+								c = b.get(code) or {}
+								val = c.get(which) or c.get("total") or c.get("free") or 0.0
+								return float(val)
+							except Exception:
+								return 0.0
+						f_usdt = _amount_from_balance(fut_bal, "USDT", "free")
+					finally:
+						try:
+							await client.close()
+						except Exception:
+							pass
 				fut_lines = [
 					"حساب فیوچرز (USDT-M):",
-					f"مارجین USDT (در دسترس): {f_usdt:.4f}",
+					f"مارجین USDT (در دسترس): {float(f_usdt or 0.0):.4f}",
 				]
 			except Exception:
 				pass

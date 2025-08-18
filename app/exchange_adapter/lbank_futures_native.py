@@ -31,9 +31,8 @@ class LBankNativeFuturesClient:
 	def _echostr(self, n: int = 16) -> str:
 		return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
 
-	def _sign(self, path: str, params: Dict[str, Any], timestamp: str, echostr: str) -> str:
-		# Placeholder; actual contract signing may differ from spot supplement
-		items = sorted((k, v) for k, v in params.items() if v is not None)
+	def _sign_contract(self, params: Dict[str, Any], timestamp: str, echostr: str) -> str:
+		items = sorted((k, v) for k, v in params.items() if v is not None and k != "sign")
 		payload = "&".join(f"{k}={v}" for k, v in items)
 		payload += f"&timestamp={timestamp}&echostr={echostr}"
 		return hmac.new(self.api_secret, payload.encode(), hashlib.sha256).hexdigest()
@@ -45,16 +44,22 @@ class LBankNativeFuturesClient:
 		params = params or {}
 		body = None
 		if private:
-			# TODO: implement correct signing for contract private
-			ts = params.get("timestamp") or ""
-			echo = params.get("echostr") or self._echostr()
-			signature = self._sign(path, params, ts, echo)
+			# Contract private headers & signing
+			# timestamp must be server time
+			try:
+				ser = await self._request("/cfd/openApi/v1/pub/getTime")
+				ts = str(ser.get("data"))
+			except Exception:
+				ts = ""
+			echo = self._echostr(32)
+			sign = self._sign_contract(params, ts, echo)
+			params = dict(params)
+			params["sign"] = sign
 			headers.update({
-				"X-LB-APIKEY": self.api_key,
-				"X-LB-SIGN": signature,
-				"X-LB-TIMESTAMP": ts,
-				"X-LB-ECHOSTR": echo,
 				"content-type": "application/json",
+				"timestamp": ts,
+				"signature_method": "HmacSHA256",
+				"echostr": echo,
 			})
 			body = json.dumps(params)
 		logger.info(f"LBANK FUTURES REST {method} {path} params={{{k:params[k] for k in params if 'secret' not in k}}}")
@@ -82,6 +87,15 @@ class LBankNativeFuturesClient:
 
 	async def market_orderbook(self, symbol: str, depth: int = 10) -> Any:
 		return await self._request("/cfd/openApi/v1/pub/marketOrder", params={"symbol": symbol, "depth": depth})
+
+	# Private endpoints
+	async def account_balance(self, asset: str = "USDT", product_group: str = "SwapU") -> Dict[str, Any]:
+		payload = {
+			"api_key": self.api_key,
+			"productGroup": product_group,
+			"asset": asset,
+		}
+		return await self._request("/cfd/openApi/v1/prv/account", method="POST", params=payload, private=True)
 
 
 class LBankNativeFuturesAdapter:
