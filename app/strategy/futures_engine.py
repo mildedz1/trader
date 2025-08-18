@@ -105,6 +105,10 @@ async def run_tick_futures(adapter: ExchangeAdapter, state: WorkerState, fstate:
 		"long_trigger": 1.0 if long_trigger else 0.0,
 		"short_trigger": 1.0 if short_trigger else 0.0,
 	}
+	# inject SL/TP if a position exists
+	if not fstate.position.flat():
+		state.last_metrics["f_sl"] = fstate.position.sl
+		state.last_metrics["f_tp"] = fstate.position.tp
 	state.last_decision_long = long_trigger
 	state.last_decision_exit = short_trigger if fstate.position.is_long else long_trigger if fstate.position.is_short else False
 	state.last_candle_ts = candle_ts

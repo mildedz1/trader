@@ -121,6 +121,15 @@ class TelegramWorkerBot:
 			lines.append("• استراتژی: futures_scalp_st")
 		else:
 			lines.append("• استراتژی: macd_zero_trend")
+		# If futures, try to display SL/TP from metrics if present
+		if self.settings.trade_mode == "futures":
+			f_sl = self.state.last_metrics.get("f_sl")
+			f_tp = self.state.last_metrics.get("f_tp")
+			if f_sl is not None or f_tp is not None:
+				lines += [
+					f"• حد ضرر (SL): {self._fmt_float(f_sl, 4) if f_sl is not None else '-'}",
+					f"• حد سود (TP): {self._fmt_float(f_tp, 4) if f_tp is not None else '-'}",
+				]
 		lines += [
 			f"• آخرین کندل: {self.state.last_candle_ts or '-'}",
 			"",
