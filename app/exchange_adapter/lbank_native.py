@@ -106,15 +106,27 @@ class LBankNativeSpotClient:
 		return await self._request("/v2/supplement/trades.do", params={"symbol": self._sym(symbol), "size": limit})
 
 	async def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 300) -> List[List[float]]:
-		# Use legacy kline.do
-		scale_map = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60}
-		scale = scale_map.get(timeframe, 5)
-		res = await self._request("/v2/kline.do", params={"symbol": self._sym(symbol), "scale": scale, "size": limit})
-		data = res.get("data") if isinstance(res, dict) else []
+		# Use legacy kline.do with 'type' (e.g., 1min, 5min, 15min, 30min, 1hour)
+		type_map = {
+			"1m": "1min",
+			"3m": "3min",
+			"5m": "5min",
+			"15m": "15min",
+			"30m": "30min",
+			"1h": "1hour",
+		}
+		k_type = type_map.get(timeframe, "5min")
+		res = await self._request("/v2/kline.do", params={"symbol": self._sym(symbol), "type": k_type, "size": limit})
+		if not isinstance(res, dict) or (str(res.get("result")).lower() == "false"):
+			return []
+		data = res.get("data") or []
 		# LBank kline: [timestamp, open, high, low, close, volume]
 		ohlcv: List[List[float]] = []
 		for k in data:
-			ohlcv.append([k[0], float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])])
+			try:
+				ohlcv.append([k[0], float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])])
+			except Exception:
+				continue
 		return ohlcv
 
 	# Private Spot Trading (Supplement)
