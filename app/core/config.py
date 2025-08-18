@@ -70,6 +70,15 @@ class Settings(BaseModel):
 	log_path: str = Field(default="/data/logs/worker.log", alias="LOG_PATH")
 	heartbeat_path: str = Field(default="/data/heartbeat", alias="HEARTBEAT_PATH")
 
+	# Compatibility aliases
+	strategy: Optional[str] = Field(default=None, alias="STRATEGY")  # accept but unused
+	rsi_period_compat: Optional[int] = Field(default=None, alias="RSI_PERIOD")
+	rsi_entry_long_compat: Optional[float] = Field(default=None, alias="RSI_ENTRY_LONG")
+	rsi_exit_long_compat: Optional[float] = Field(default=None, alias="RSI_EXIT_LONG")
+	macd_confirm_compat: Optional[bool] = Field(default=None, alias="MACD_CONFIRM")
+	tp_pct_compat: Optional[float] = Field(default=None, alias="TP_PCT")
+	sl_pct_compat: Optional[float] = Field(default=None, alias="SL_PCT")
+
 	@field_validator("allowed_chat_ids", mode="before")
 	@classmethod
 	def parse_chat_ids(cls, v: str | list[int]):
