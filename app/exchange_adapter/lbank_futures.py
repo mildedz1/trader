@@ -19,7 +19,10 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 		})
 
 	async def connect(self) -> None:
-		await self.exchange.load_markets()
+		try:
+			await self.exchange.load_markets(reload=False)
+		except Exception:
+			await self.exchange.load_markets()
 
 	async def close(self) -> None:
 		try:

@@ -410,17 +410,10 @@ class Worker:
 		self.state.position_overview = position_overview
 
 	async def fetch_ohlcv(self, limit: int = 300):
-		client = ccxt.lbank({"enableRateLimit": True, "options": {"defaultType": "swap" if self.settings.trade_mode == "futures" else "spot"}})
-		try:
-			await client.load_markets()
-			sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
-			ohlcv = await client.fetch_ohlcv(sym, timeframe=(self.settings.futures_timeframe if self.settings.trade_mode == "futures" else self.settings.timeframe), limit=limit)
-			return ohlcv
-		finally:
-			try:
-				await client.close()
-			except Exception:
-				pass
+		# Use the already-connected adapter to avoid extra load_markets calls and CF rate limits
+		sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
+		tf = self.settings.futures_timeframe if self.settings.trade_mode == "futures" else self.settings.timeframe
+		return await self.adapter.fetch_ohlcv(sym, timeframe=tf, limit=limit)
 
 	async def loop(self) -> None:
 		interval = float(self.settings.tick_interval_sec)

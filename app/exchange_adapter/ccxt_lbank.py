@@ -18,7 +18,11 @@ class CcxtLBankAdapter(ExchangeAdapter):
 		})
 
 	async def connect(self) -> None:
-		await self.exchange.load_markets()
+		# reduce metadata calls to avoid CF 1015
+		try:
+			await self.exchange.load_markets(reload=False)
+		except Exception:
+			await self.exchange.load_markets()
 
 	def _resolve_symbol(self, symbol: str) -> str:
 		# Try to resolve symbol robustly against exchange symbols
