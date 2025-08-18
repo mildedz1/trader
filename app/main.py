@@ -408,6 +408,42 @@ class Worker:
 		self.state.manual_buy = manual_buy
 		self.state.manual_close = manual_close
 		self.state.position_overview = position_overview
+		async def diagnose() -> str:
+			lines: list[str] = []
+			lines.append("[تشخیص سریع]")
+			lines.append(f"MODE={self.settings.mode} TRADE_MODE={self.settings.trade_mode}")
+			lines.append(f"SPOT_NATIVE={getattr(self.settings,'lbank_use_native_spot',False)} FUTURES_NATIVE={getattr(self.settings,'lbank_use_native_futures',False)}")
+			# Symbol mapping
+			try:
+				spot_sym = self.settings.symbol
+				fut_sym = self.settings.futures_symbol
+				lines.append(f"SYMBOLS spot={spot_sym} futures={fut_sym}")
+			except Exception:
+				pass
+			# OHLCV check
+			try:
+				ohlcv = await self.fetch_ohlcv(limit=10)
+				lines.append(f"OHLCV ok={bool(ohlcv)} last_ts={ohlcv[-1][0] if ohlcv else '-'}")
+			except Exception as exc:
+				lines.append(f"OHLCV error: {exc}")
+			# Ticker check
+			sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
+			try:
+				t = await self.adapter.fetch_ticker(sym)
+				price = float(t.get("last") or t.get("close") or 0.0) if isinstance(t, dict) else 0.0
+				lines.append(f"Ticker ok={price>0} price={price}")
+			except Exception as exc:
+				lines.append(f"Ticker error: {exc}")
+			# Balance check
+			try:
+				b = await self.adapter.fetch_balance()
+				ok = isinstance(b, dict) or isinstance(b, list)
+				lines.append(f"Balance ok={ok}")
+			except Exception as exc:
+				lines.append(f"Balance error: {exc}")
+			return "\n".join(lines)
+
+		self.state.diagnose = diagnose
 
 		async def manual_force_long() -> str:
 			# Enter long immediately (ignores strategy), based on current mode

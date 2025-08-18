@@ -70,6 +70,9 @@ class TelegramWorkerBot:
 			[
 				InlineKeyboardButton(text="تنظیمات", callback_data="menu:config"),
 			],
+			[
+				InlineKeyboardButton(text="عیب‌یابی سریع", callback_data="menu:diagnose"),
+			],
 		]
 		return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -257,6 +260,11 @@ class TelegramWorkerBot:
 			await cq.answer("ارسال شد")
 		elif action == "config":
 			await self.cmd_config(cq.message)
+			await cq.answer()
+		elif action == "diagnose":
+			if self.state.diagnose:
+				text = await self.state.diagnose()
+				await self.bot.send_message(chat_id, text)
 			await cq.answer()
 		else:
 			await cq.answer()
