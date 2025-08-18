@@ -67,7 +67,11 @@ class LBankNativeSpotClient:
 				"content-type": "application/json",
 			})
 			body = json.dumps(params)
-		logger.info(f"LBANK REST {method} {path} params={{{k:params[k] for k in params if 'secret' not in k}}}")
+		try:
+			log_params = {key: params[key] for key in params if 'secret' not in key}
+		except Exception:
+			log_params = {}
+		logger.info(f"LBANK REST {method} {path} params={log_params}")
 		if method == "GET":
 			async with self.session.get(url, params=params if not private else None, headers=headers) as resp:
 				text = await resp.text()
