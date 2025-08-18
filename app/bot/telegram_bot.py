@@ -57,6 +57,10 @@ class TelegramWorkerBot:
 				InlineKeyboardButton(text="بستن دستی (SELL)", callback_data="menu:manual_close"),
 			],
 			[
+				InlineKeyboardButton(text="ورود فوری لانگ", callback_data="menu:force_long"),
+				InlineKeyboardButton(text="ورود فوری شورت", callback_data="menu:force_short"),
+			],
+			[
 				InlineKeyboardButton(text="توقف", callback_data="menu:pause"),
 			],
 			[
@@ -230,6 +234,16 @@ class TelegramWorkerBot:
 		elif action == "manual_close":
 			if self.state.manual_close:
 				text = await self.state.manual_close()
+				await self.bot.send_message(chat_id, text)
+			await cq.answer()
+		elif action == "force_long":
+			if self.state.manual_force_long:
+				text = await self.state.manual_force_long()
+				await self.bot.send_message(chat_id, text)
+			await cq.answer()
+		elif action == "force_short":
+			if self.state.manual_force_short:
+				text = await self.state.manual_force_short()
 				await self.bot.send_message(chat_id, text)
 			await cq.answer()
 		elif action == "pause":

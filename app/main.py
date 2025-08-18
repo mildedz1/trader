@@ -409,6 +409,54 @@ class Worker:
 		self.state.manual_close = manual_close
 		self.state.position_overview = position_overview
 
+		async def manual_force_long() -> str:
+			# Enter long immediately (ignores strategy), based on current mode
+			try:
+				if self.settings.trade_mode == "futures":
+					sym = self.settings.futures_symbol
+					bal = await self.adapter.fetch_balance()
+					usdt = float((bal.get("free") or {}).get("USDT", 0.0))
+					if usdt <= 0:
+						return "موجودی کافی برای ورود لانگ وجود ندارد"
+					ticker = await self.adapter.fetch_ticker(sym)
+					price = float(ticker.get("last") or ticker.get("close") or 0.0)
+					lev = float(getattr(self.settings, "futures_leverage", 1))
+					margin_usdt = usdt if getattr(self.settings, "use_full_balance", True) else min(usdt, 1.0)
+					base_size = (margin_usdt * lev) / max(price, 1e-8)
+					if hasattr(self.adapter, "round_amount"):
+						base_size = self.adapter.round_amount(sym, base_size)  # type: ignore[attr-defined]
+					order = await self.adapter.create_market_order(sym, "buy", base_size)  # type: ignore[attr-defined]
+					return f"ورود فوری لانگ (Futures) انجام شد: {order}"
+				else:
+					sym = self.settings.symbol
+					order = await self.adapter.create_market_buy_order(sym, 1.0)
+					return f"ورود فوری لانگ (Spot) انجام شد: {order}"
+			except Exception as exc:
+				return f"ورود فوری لانگ ناموفق بود: {exc}"
+
+		async def manual_force_short() -> str:
+			# Enter short immediately (futures only)
+			try:
+				if self.settings.trade_mode != "futures":
+					return "شورت فقط در فیوچرز پشتیبانی می‌شود"
+				sym = self.settings.futures_symbol
+				ticker = await self.adapter.fetch_ticker(sym)
+				price = float(ticker.get("last") or ticker.get("close") or 0.0)
+				bal = await self.adapter.fetch_balance()
+				usdt = float((bal.get("free") or {}).get("USDT", 0.0))
+				lev = float(getattr(self.settings, "futures_leverage", 1))
+				margin_usdt = usdt if getattr(self.settings, "use_full_balance", True) else min(usdt, 1.0)
+				base_size = (margin_usdt * lev) / max(price, 1e-8)
+				if hasattr(self.adapter, "round_amount"):
+					base_size = self.adapter.round_amount(sym, base_size)  # type: ignore[attr-defined]
+				order = await self.adapter.create_market_order(sym, "sell", base_size)  # type: ignore[attr-defined]
+				return f"ورود فوری شورت (Futures) انجام شد: {order}"
+			except Exception as exc:
+				return f"ورود فوری شورت ناموفق بود: {exc}"
+
+		self.state.manual_force_long = manual_force_long
+		self.state.manual_force_short = manual_force_short
+
 	async def fetch_ohlcv(self, limit: int = 300):
 		# Use the already-connected adapter to avoid extra load_markets calls and CF rate limits
 		sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol

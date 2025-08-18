@@ -52,6 +52,9 @@ class WorkerState:
 	manual_buy: Optional[Callable[[], Awaitable[str]]] = None
 	manual_close: Optional[Callable[[], Awaitable[str]]] = None
 	check_signal: Optional[Callable[[], Awaitable[str]]] = None
+	# Force actions (futures):
+	manual_force_long: Optional[Callable[[], Awaitable[str]]] = None
+	manual_force_short: Optional[Callable[[], Awaitable[str]]] = None
 
 	def heartbeat(self, heartbeat_path: str) -> None:
 		self.last_heartbeat_ts = time.time()
