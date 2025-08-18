@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 from loguru import logger
-from .lbank_native import LBankNativeSpotClient
 
 import ccxt.async_support as ccxt  # type: ignore
 from .base import ExchangeAdapter
@@ -18,7 +17,6 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 			"enableRateLimit": True,
 			"options": {"defaultType": "swap"},
 		})
-		self._spot_native: LBankNativeSpotClient | None = None
 		self._spot_ccxt = ccxt.lbank({
 			"apiKey": self.api_key,
 			"secret": self.api_secret,
@@ -31,9 +29,6 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 			await self.exchange.load_markets(reload=False)
 		except Exception:
 			await self.exchange.load_markets()
-		# prepare spot native for OHLCV
-		self._spot_native = LBankNativeSpotClient(self.api_key, self.api_secret)
-		await self._spot_native.connect()
 		try:
 			await self._spot_ccxt.load_markets(reload=False)
 		except Exception:
@@ -45,17 +40,11 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 		except Exception:
 			pass
 		try:
-			if self._spot_native:
-				await self._spot_native.close()
-		except Exception:
-			pass
-		try:
 			await self._spot_ccxt.close()
 		except Exception:
 			pass
 
 	def _resolve_symbol(self, symbol: str) -> str:
-		# find matching swap market symbol
 		try:
 			markets = getattr(self.exchange, "markets", {}) or {}
 			if symbol in markets and markets[symbol].get("type") == "swap":
@@ -64,11 +53,9 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 			for s, m in markets.items():
 				if m.get("type") == "swap" and m.get("base") == base and m.get("quote") == quote:
 					return s
-			# fallback to upper
 			u = symbol.upper()
 			if u in markets and markets[u].get("type") == "swap":
 				return u
-			# try colon form explicitly
 			candidate = f"{base}/{quote}:USDT"
 			if candidate in markets and markets[candidate].get("type") == "swap":
 				return candidate
@@ -77,39 +64,11 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 		logger.debug(f"LBankFutures _resolve_symbol fallback -> {symbol}")
 		return symbol
 
-	async def set_leverage(self, symbol: str, leverage: int) -> None:
-		sym = self._resolve_symbol(symbol)
-		try:
-			# ccxt unified method naming can vary between versions
-			if hasattr(self.exchange, "setLeverage"):
-				await self.exchange.setLeverage(leverage, sym)  # type: ignore[attr-defined]
-			elif hasattr(self.exchange, "set_leverage"):
-				await self.exchange.set_leverage(leverage, sym)  # type: ignore[attr-defined]
-		except Exception:
-			pass
-
-	async def set_position_mode(self, symbol: str, mode: str) -> None:
-		sym = self._resolve_symbol(symbol)
-		try:
-			if hasattr(self.exchange, "setMarginMode"):
-				await self.exchange.setMarginMode(mode, sym)  # type: ignore[attr-defined]
-			elif hasattr(self.exchange, "set_margin_mode"):
-				await self.exchange.set_margin_mode(mode, sym)  # type: ignore[attr-defined]
-		except Exception:
-			pass
-
 	def _spot_symbol(self, symbol: str) -> str:
-		# convert swap symbol like ETH/USDT:USDT -> ETH/USDT for spot kline
 		return symbol.split(":")[0]
 
 	async def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 300) -> List[List[float]]:
-		# Use spot kline for OHLCV to avoid swap BadSymbol
 		spot_sym = self._spot_symbol(symbol)
-		if self._spot_native is not None:
-			data = await self._spot_native.fetch_ohlcv(spot_sym, timeframe, limit)
-			if data:
-				return data
-		# fallback to ccxt spot call via same exchange (may still work)
 		try:
 			return await self._spot_ccxt.fetch_ohlcv(spot_sym, timeframe=timeframe, limit=limit)
 		except Exception:
@@ -136,7 +95,6 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 		params: Dict[str, Any] = {}
 		if reduce_only:
 			params["reduceOnly"] = True
-		# LBank requires price for market BUY to compute cost
 		price = None
 		if side.lower() == "buy":
 			ticker = await self.exchange.fetch_ticker(sym)
@@ -144,11 +102,9 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 			if price <= 0:
 				raise ValueError("Invalid ticker price for market buy")
 			return await self.exchange.create_order(sym, type="market", side=side, amount=amount_base, price=price, params=params)
-		# sell path generally does not require price
 		return await self.exchange.create_order(sym, type="market", side=side, amount=amount_base, params=params)
 
 	async def create_market_buy_order(self, symbol: str, amount_quote: float) -> Dict[str, Any]:
-		"""Create a market BUY using quote amount by converting to base via ticker price."""
 		sym = self._resolve_symbol(symbol)
 		ticker = await self.exchange.fetch_ticker(sym)
 		price = float(ticker.get("last") or ticker.get("close") or 0.0)
@@ -156,7 +112,6 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 			raise ValueError("Invalid ticker price for market buy")
 		amount_base = amount_quote / price
 		amount_base = float(self.exchange.amount_to_precision(sym, amount_base))
-		# Explicitly pass price for LBank market buy
 		return await self.exchange.create_order(sym, type="market", side="buy", amount=amount_base, price=price)
 
 	async def create_market_sell_order(self, symbol: str, amount_base: float) -> Dict[str, Any]:
