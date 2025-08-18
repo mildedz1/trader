@@ -436,8 +436,21 @@ class Worker:
 					usdt = _amt(bal)
 					if usdt <= 0:
 						return "موجودی کافی برای ورود لانگ وجود ندارد"
-					ticker = await self.adapter.fetch_ticker(sym)
-					price = float(ticker.get("last") or ticker.get("close") or 0.0)
+					# Prefer last close from OHLCV to avoid ticker shape issues
+					price = 0.0
+					try:
+						ohlcv = await self.fetch_ohlcv(limit=2)
+						if ohlcv and len(ohlcv[-1]) >= 5:
+							price = float(ohlcv[-1][4])
+					except Exception:
+						price = 0.0
+					if price <= 0:
+						try:
+							t = await self.adapter.fetch_ticker(sym)
+							if isinstance(t, dict):
+								price = float(t.get("last") or t.get("close") or 0.0)
+						except Exception:
+							price = float(self.state.last_price or 0.0)
 					lev = float(getattr(self.settings, "futures_leverage", 1))
 					margin_usdt = usdt if getattr(self.settings, "use_full_balance", True) else min(usdt, 1.0)
 					base_size = (margin_usdt * lev) / max(price, 1e-8)
@@ -458,8 +471,21 @@ class Worker:
 				if self.settings.trade_mode != "futures":
 					return "شورت فقط در فیوچرز پشتیبانی می‌شود"
 				sym = self.settings.futures_symbol
-				ticker = await self.adapter.fetch_ticker(sym)
-				price = float(ticker.get("last") or ticker.get("close") or 0.0)
+				# Prefer last close from OHLCV to avoid ticker shape issues
+				price = 0.0
+				try:
+					ohlcv = await self.fetch_ohlcv(limit=2)
+					if ohlcv and len(ohlcv[-1]) >= 5:
+						price = float(ohlcv[-1][4])
+				except Exception:
+					price = 0.0
+				if price <= 0:
+					try:
+						t = await self.adapter.fetch_ticker(sym)
+						if isinstance(t, dict):
+							price = float(t.get("last") or t.get("close") or 0.0)
+					except Exception:
+						price = float(self.state.last_price or 0.0)
 				bal = await self.adapter.fetch_balance()
 				def _amt(b):
 					try:
