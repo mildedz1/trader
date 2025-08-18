@@ -40,7 +40,10 @@ class LBankNativeFuturesClient:
 	async def _request(self, path: str, method: str = "GET", params: Optional[Dict[str, Any]] = None, private: bool = False) -> Any:
 		assert self.session is not None, "session not initialized"
 		url = f"{self.BASE_URL}{path}"
-		headers: Dict[str, str] = {"accept": "application/json"}
+		headers: Dict[str, str] = {
+			"accept": "application/json, text/plain, */*",
+			"user-agent": "Mozilla/5.0 (X11; Linux x86_64) TelegramWorker/1.0 aiohttp",
+		}
 		params = params or {}
 		body = None
 		if private:
@@ -66,11 +69,17 @@ class LBankNativeFuturesClient:
 		if method == "GET":
 			async with self.session.get(url, params=params if not private else None, headers=headers) as resp:
 				text = await resp.text()
+				if "text/html" in (resp.headers.get("content-type") or "") and "Cloudflare" in text:
+					logger.warning(f"LBANK FUTURES RESP {resp.status} {path} Cloudflare page")
+					return {"code": resp.status, "msg": "Cloudflare page", "data": None}
 				logger.info(f"LBANK FUTURES RESP {resp.status} {path} {text[:256]}")
 				return json.loads(text)
 		else:
 			async with self.session.post(url, data=body if private else json.dumps(params), headers=headers) as resp:
 				text = await resp.text()
+				if "text/html" in (resp.headers.get("content-type") or "") and "Cloudflare" in text:
+					logger.warning(f"LBANK FUTURES RESP {resp.status} {path} Cloudflare page")
+					return {"code": resp.status, "msg": "Cloudflare page", "data": None}
 				logger.info(f"LBANK FUTURES RESP {resp.status} {path} {text[:256]}")
 				return json.loads(text)
 
