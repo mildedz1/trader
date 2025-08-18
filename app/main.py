@@ -12,6 +12,7 @@ from .core.state import WorkerState
 from .exchange_adapter.ccxt_lbank import CcxtLBankAdapter
 from .exchange_adapter.lbank_futures import CcxtLBankFuturesAdapter
 from .exchange_adapter.lbank_native import LBankNativeSpotClient
+from .exchange_adapter.lbank_spot_native_adapter import LBankNativeSpotAdapter
 from .strategy.logic import run_tick
 import ccxt.async_support as ccxt  # keep import for runtime
 
@@ -32,7 +33,10 @@ class Worker:
 		if self.settings.trade_mode == "futures":
 			self.adapter = CcxtLBankFuturesAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
 		else:
-			self.adapter = CcxtLBankAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
+			if self.settings.lbank_use_native_spot:
+				self.adapter = LBankNativeSpotAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
+			else:
+				self.adapter = CcxtLBankAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
 		await self.adapter.connect()
 		# Prepare native spot client for robust spot orders
 		if self.settings.trade_mode == "spot" and self.settings.lbank_use_native_spot:
