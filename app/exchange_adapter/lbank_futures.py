@@ -90,6 +90,15 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 		params: Dict[str, Any] = {}
 		if reduce_only:
 			params["reduceOnly"] = True
+		# LBank requires price for market BUY to compute cost
+		price = None
+		if side.lower() == "buy":
+			ticker = await self.exchange.fetch_ticker(sym)
+			price = float(ticker.get("last") or ticker.get("close") or 0.0)
+			if price <= 0:
+				raise ValueError("Invalid ticker price for market buy")
+			return await self.exchange.create_order(sym, type="market", side=side, amount=amount_base, price=price, params=params)
+		# sell path generally does not require price
 		return await self.exchange.create_order(sym, type="market", side=side, amount=amount_base, params=params)
 
 	async def create_market_buy_order(self, symbol: str, amount_quote: float) -> Dict[str, Any]:
@@ -101,7 +110,8 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 			raise ValueError("Invalid ticker price for market buy")
 		amount_base = amount_quote / price
 		amount_base = float(self.exchange.amount_to_precision(sym, amount_base))
-		return await self.create_market_order(sym, "buy", amount_base)
+		# Explicitly pass price for LBank market buy
+		return await self.exchange.create_order(sym, type="market", side="buy", amount=amount_base, price=price)
 
 	async def create_market_sell_order(self, symbol: str, amount_base: float) -> Dict[str, Any]:
 		sym = self._resolve_symbol(symbol)
