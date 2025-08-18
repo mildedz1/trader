@@ -495,6 +495,18 @@ class Worker:
 					base_size = (margin_usdt * lev) / max(price, 1e-8)
 					if hasattr(self.adapter, "round_amount"):
 						base_size = self.adapter.round_amount(sym, base_size)  # type: ignore[attr-defined]
+					# Enforce minimum amount
+					try:
+						mr = self.adapter.get_market_rules(sym)  # type: ignore[attr-defined]
+						min_amount = float(mr.get("min_amount", 0.0))
+						if base_size < max(min_amount, 0.0):
+							needed_margin = (max(min_amount, 0.0) * price) / max(lev, 1.0)
+							return (
+								f"سایز ناکافی ({base_size:.6f} < {min_amount}); "
+								f"حداقل مارجین لازم ≈ {needed_margin:.4f} USDT با لوریج {lev}."
+							)
+					except Exception:
+						pass
 					order = await self.adapter.create_market_order(sym, "buy", base_size)  # type: ignore[attr-defined]
 					return f"ورود فوری لانگ (Futures) انجام شد: {order}"
 				else:
@@ -553,6 +565,18 @@ class Worker:
 				base_size = (margin_usdt * lev) / max(price, 1e-8)
 				if hasattr(self.adapter, "round_amount"):
 					base_size = self.adapter.round_amount(sym, base_size)  # type: ignore[attr-defined]
+				# Enforce minimum amount
+				try:
+					mr = self.adapter.get_market_rules(sym)  # type: ignore[attr-defined]
+					min_amount = float(mr.get("min_amount", 0.0))
+					if base_size < max(min_amount, 0.0):
+						needed_margin = (max(min_amount, 0.0) * price) / max(lev, 1.0)
+						return (
+							f"سایز ناکافی ({base_size:.6f} < {min_amount}); "
+							f"حداقل مارجین لازم ≈ {needed_margin:.4f} USDT با لوریج {lev}."
+						)
+				except Exception:
+					pass
 				order = await self.adapter.create_market_order(sym, "sell", base_size)  # type: ignore[attr-defined]
 				return f"ورود فوری شورت (Futures) انجام شد: {order}"
 			except Exception as exc:
