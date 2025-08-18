@@ -415,7 +415,25 @@ class Worker:
 				if self.settings.trade_mode == "futures":
 					sym = self.settings.futures_symbol
 					bal = await self.adapter.fetch_balance()
-					usdt = float((bal.get("free") or {}).get("USDT", 0.0))
+					def _amt(b):
+						try:
+							if isinstance(b, dict):
+								m = b.get("free") or {}
+								if isinstance(m, dict) and "USDT" in m:
+									return float(m.get("USDT", 0.0))
+								c = b.get("USDT") or {}
+								v = c.get("free") or c.get("total") or c.get("balance") or 0.0
+								return float(v)
+							if isinstance(b, list):
+								for it in b:
+									if not isinstance(it, dict):
+										continue
+									if (it.get("asset") or it.get("currency") or it.get("coin")) == "USDT":
+										return float(it.get("free") or it.get("available") or it.get("balance") or 0.0)
+							return 0.0
+						except Exception:
+							return 0.0
+					usdt = _amt(bal)
 					if usdt <= 0:
 						return "موجودی کافی برای ورود لانگ وجود ندارد"
 					ticker = await self.adapter.fetch_ticker(sym)
@@ -443,7 +461,25 @@ class Worker:
 				ticker = await self.adapter.fetch_ticker(sym)
 				price = float(ticker.get("last") or ticker.get("close") or 0.0)
 				bal = await self.adapter.fetch_balance()
-				usdt = float((bal.get("free") or {}).get("USDT", 0.0))
+				def _amt(b):
+					try:
+						if isinstance(b, dict):
+							m = b.get("free") or {}
+							if isinstance(m, dict) and "USDT" in m:
+								return float(m.get("USDT", 0.0))
+							c = b.get("USDT") or {}
+							v = c.get("free") or c.get("total") or c.get("balance") or 0.0
+							return float(v)
+						if isinstance(b, list):
+							for it in b:
+								if not isinstance(it, dict):
+									continue
+								if (it.get("asset") or it.get("currency") or it.get("coin")) == "USDT":
+									return float(it.get("free") or it.get("available") or it.get("balance") or 0.0)
+						return 0.0
+					except Exception:
+						return 0.0
+				usdt = _amt(bal)
 				lev = float(getattr(self.settings, "futures_leverage", 1))
 				margin_usdt = usdt if getattr(self.settings, "use_full_balance", True) else min(usdt, 1.0)
 				base_size = (margin_usdt * lev) / max(price, 1e-8)
