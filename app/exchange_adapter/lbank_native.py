@@ -116,10 +116,19 @@ class LBankNativeSpotClient:
 			"1h": "1hour",
 		}
 		k_type = type_map.get(timeframe, "5min")
-		res = await self._request("/v2/kline.do", params={"symbol": self._sym(symbol), "type": k_type, "size": limit})
-		if not isinstance(res, dict) or (str(res.get("result")).lower() == "false"):
-			return []
-		data = res.get("data") or []
+		params = {"symbol": self._sym(symbol), "type": k_type, "size": int(limit)}
+		res = await self._request("/v2/kline.do", params=params)
+		data = []
+		if isinstance(res, dict) and str(res.get("result", "true")).lower() == "true":
+			data = res.get("data") or []
+		# Fallback to 'scale' param if illegal parameter
+		if not data:
+			scale_map = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60}
+			scale = scale_map.get(timeframe, 5)
+			params2 = {"symbol": self._sym(symbol), "scale": scale, "size": int(limit)}
+			res2 = await self._request("/v2/kline.do", params=params2)
+			if isinstance(res2, dict) and str(res2.get("result", "true")).lower() == "true":
+				data = res2.get("data") or []
 		# LBank kline: [timestamp, open, high, low, close, volume]
 		ohlcv: List[List[float]] = []
 		for k in data:
