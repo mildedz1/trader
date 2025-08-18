@@ -19,6 +19,12 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 			"options": {"defaultType": "swap"},
 		})
 		self._spot_native: LBankNativeSpotClient | None = None
+		self._spot_ccxt = ccxt.lbank({
+			"apiKey": self.api_key,
+			"secret": self.api_secret,
+			"enableRateLimit": True,
+			"options": {"defaultType": "spot"},
+		})
 
 	async def connect(self) -> None:
 		try:
@@ -28,6 +34,10 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 		# prepare spot native for OHLCV
 		self._spot_native = LBankNativeSpotClient(self.api_key, self.api_secret)
 		await self._spot_native.connect()
+		try:
+			await self._spot_ccxt.load_markets(reload=False)
+		except Exception:
+			await self._spot_ccxt.load_markets()
 
 	async def close(self) -> None:
 		try:
@@ -37,6 +47,10 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 		try:
 			if self._spot_native:
 				await self._spot_native.close()
+		except Exception:
+			pass
+		try:
+			await self._spot_ccxt.close()
 		except Exception:
 			pass
 
@@ -92,10 +106,12 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 		# Use spot kline for OHLCV to avoid swap BadSymbol
 		spot_sym = self._spot_symbol(symbol)
 		if self._spot_native is not None:
-			return await self._spot_native.fetch_ohlcv(spot_sym, timeframe, limit)
+			data = await self._spot_native.fetch_ohlcv(spot_sym, timeframe, limit)
+			if data:
+				return data
 		# fallback to ccxt spot call via same exchange (may still work)
 		try:
-			return await self.exchange.fetch_ohlcv(spot_sym, timeframe=timeframe, limit=limit)
+			return await self._spot_ccxt.fetch_ohlcv(spot_sym, timeframe=timeframe, limit=limit)
 		except Exception:
 			return []
 
