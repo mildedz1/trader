@@ -1,0 +1,13 @@
+version: "3.9"
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lbank-telegram-trader:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    command: ["python", "-m", "app"]
