@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
+from loguru import logger
 
 import ccxt.async_support as ccxt  # type: ignore
 from .base import ExchangeAdapter
@@ -40,8 +41,13 @@ class CcxtLBankFuturesAdapter(ExchangeAdapter):
 			u = symbol.upper()
 			if u in markets and markets[u].get("type") == "swap":
 				return u
+			# try colon form explicitly
+			candidate = f"{base}/{quote}:USDT"
+			if candidate in markets and markets[candidate].get("type") == "swap":
+				return candidate
 		except Exception:
 			pass
+		logger.debug(f"LBankFutures _resolve_symbol fallback -> {symbol}")
 		return symbol
 
 	async def set_leverage(self, symbol: str, leverage: int) -> None:

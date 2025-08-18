@@ -331,12 +331,12 @@ class Worker:
 								f"سایز ناکافی نسبت به حداقل ({base_size:.6f} < {min_amount}); "
 								f"حداقل مارجین لازم ≈ {needed_margin:.4f} USDT با لوریج {lev}."
 							)
-						# Place futures market BUY using base size (if supported), else fall back to quote
+						# Place futures market BUY using base size and explicit price for LBank
 						if hasattr(self.adapter, "create_market_order"):
 							order = await self.adapter.create_market_order(sym, "buy", base_size)  # type: ignore[attr-defined]
 						else:
-							# Fall back: use quote, though some exchanges require base; try leveraged quote
-							order = await self.adapter.create_market_buy_order(sym, margin_usdt * lev)
+							# Fallback: convert to base with price and call create_market_buy_order which passes price for LBank
+							order = await self.adapter.create_market_buy_order(sym, margin_usdt)
 						return f"خرید دستی (Futures) انجام شد: {order}"
 					else:
 						# ccxt spot fallback when native spot disabled
