@@ -16,6 +16,8 @@ class Settings(BaseModel):
 	exchange_id: str = Field(default="lbank", alias="EXCHANGE_ID")
 	lbank_api_key: Optional[str] = Field(default=None, alias="LBANK_API_KEY")
 	lbank_api_secret: Optional[str] = Field(default=None, alias="LBANK_API_SECRET")
+	lbank_use_native_spot: bool = Field(default=True, alias="LBANK_USE_NATIVE_SPOT")
+	lbank_use_native_futures: bool = Field(default=False, alias="LBANK_USE_NATIVE_FUTURES")
 
 	# Trade mode
 	trade_mode: str = Field(default="futures", alias="TRADE_MODE")  # spot | futures

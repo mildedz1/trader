@@ -35,7 +35,7 @@ class Worker:
 			self.adapter = CcxtLBankAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
 		await self.adapter.connect()
 		# Prepare native spot client for robust spot orders
-		if self.settings.trade_mode == "spot":
+		if self.settings.trade_mode == "spot" and self.settings.lbank_use_native_spot:
 			self.native_spot = LBankNativeSpotClient(self.settings.lbank_api_key, self.settings.lbank_api_secret)
 			await self.native_spot.connect()
 		logger.info("Connected to exchange adapter")
