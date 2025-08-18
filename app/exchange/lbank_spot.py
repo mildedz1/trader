@@ -44,3 +44,17 @@ class LBankSpot(Exchange):
 	async def create_market_sell_order(self, symbol: str, amount_base: float) -> Dict[str, Any]:
 		amount_base = float(self.exchange.amount_to_precision(symbol, amount_base))
 		return await self.exchange.create_order(symbol, type="market", side="sell", amount=amount_base)
+
+	def round_amount(self, symbol: str, amount: float) -> float:
+		return float(self.exchange.amount_to_precision(symbol, amount))
+
+	def get_market_rules(self, symbol: str) -> Dict[str, float]:
+		m = self.exchange.market(symbol)
+		limits = m.get("limits", {}) or {}
+		precision = m.get("precision", {}) or {}
+		return {
+			"min_cost": float((limits.get("cost") or {}).get("min") or 0.0),
+			"min_amount": float((limits.get("amount") or {}).get("min") or 0.0),
+			"price_decimals": float(precision.get("price", 8)),
+			"amount_decimals": float(precision.get("amount", 8)),
+		}

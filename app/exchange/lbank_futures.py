@@ -40,7 +40,6 @@ class LBankFutures(Exchange):
 
 	async def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 300) -> List[List[float]]:
 		sym = self._resolve_symbol(symbol)
-		# Some venues don't provide swap OHLCV reliably; fallback to spot symbol
 		try:
 			return await self.exchange.fetch_ohlcv(sym, timeframe=timeframe, limit=limit)
 		except Exception:
@@ -71,3 +70,19 @@ class LBankFutures(Exchange):
 		sym = self._resolve_symbol(symbol)
 		if hasattr(self.exchange, "setLeverage"):
 			await self.exchange.setLeverage(leverage, sym)  # type: ignore[attr-defined]
+
+	def round_amount(self, symbol: str, amount: float) -> float:
+		sym = self._resolve_symbol(symbol)
+		return float(self.exchange.amount_to_precision(sym, amount))
+
+	def get_market_rules(self, symbol: str) -> Dict[str, float]:
+		sym = self._resolve_symbol(symbol)
+		m = self.exchange.market(sym)
+		limits = m.get("limits", {}) or {}
+		precision = m.get("precision", {}) or {}
+		return {
+			"min_cost": float((limits.get("cost") or {}).get("min") or 0.0),
+			"min_amount": float((limits.get("amount") or {}).get("min") or 0.0),
+			"price_decimals": float(precision.get("price", 8)),
+			"amount_decimals": float(precision.get("amount", 8)),
+		}
