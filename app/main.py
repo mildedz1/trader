@@ -153,22 +153,55 @@ class Worker:
 
 		async def manual_buy() -> str:
 			try:
-				bal = await self.adapter.fetch_balance()
 				sym = self.settings.futures_symbol if self.settings.trade_mode == "futures" else self.settings.symbol
 				if self.settings.trade_mode == "spot" and self.native_spot is not None:
 					# Use native REST spot order
 					order = await self.native_spot.create_market_buy_quote(sym, 1.0)  # hard cap 1 USDT
 					return f"خرید دستی (Spot/Native) انجام شد: {order}"
 				else:
-					# Futures or fallback to ccxt
-					ticker = await self.adapter.fetch_ticker(sym)
-					price = float(ticker.get("last") or ticker.get("close") or 0.0)
-					from .strategy.logic import compute_position_size_usdt_capped
-					amount_base_cap, amount_quote_cap = await compute_position_size_usdt_capped(self.adapter, self.settings, price)
-					if amount_quote_cap <= 0 or amount_base_cap <= 0:
-						return "امکان خرید نیست: موجودی/سایز ناکافی"
-					order = await self.adapter.create_market_buy_order(sym, amount_quote_cap)
-					return f"خرید دستی انجام شد: {order}"
+					# Futures or fallback to ccxt spot
+					if self.settings.trade_mode == "futures":
+						bal = await self.adapter.fetch_balance()
+						usdt_free = float((bal.get("free") or {}).get("USDT", 0.0))
+						ticker = await self.adapter.fetch_ticker(sym)
+						price = float(ticker.get("last") or ticker.get("close") or 0.0)
+						lev = float(getattr(self.settings, "futures_leverage", 1))
+						if price <= 0 or usdt_free <= 0:
+							return "امکان خرید نیست: قیمت/موجودی نامعتبر"
+						margin_usdt = usdt_free if getattr(self.settings, "use_full_balance", True) else min(usdt_free, 1.0)
+						base_size = (margin_usdt * lev) / max(price, 1e-8)
+						# Enforce precision and min amount
+						min_amount = 0.0
+						try:
+							mr = self.adapter.get_market_rules(sym)  # type: ignore[attr-defined]
+							min_amount = float(mr.get("min_amount", 0.0))
+						except Exception:
+							pass
+						if hasattr(self.adapter, "round_amount"):
+							base_size = self.adapter.round_amount(sym, base_size)  # type: ignore[attr-defined]
+						if base_size < max(min_amount, 0.0):
+							needed_margin = (max(min_amount, 0.0) * price) / max(lev, 1.0)
+							return (
+								f"سایز ناکافی نسبت به حداقل ({base_size:.6f} < {min_amount}); "
+								f"حداقل مارجین لازم ≈ {needed_margin:.4f} USDT با لوریج {lev}."
+							)
+						# Place futures market BUY using base size (if supported), else fall back to quote
+						if hasattr(self.adapter, "create_market_order"):
+							order = await self.adapter.create_market_order(sym, "buy", base_size)  # type: ignore[attr-defined]
+						else:
+							# Fall back: use quote, though some exchanges require base; try leveraged quote
+							order = await self.adapter.create_market_buy_order(sym, margin_usdt * lev)
+						return f"خرید دستی (Futures) انجام شد: {order}"
+					else:
+						# ccxt spot fallback when native spot disabled
+						ticker = await self.adapter.fetch_ticker(sym)
+						price = float(ticker.get("last") or ticker.get("close") or 0.0)
+						from .strategy.logic import compute_position_size_usdt_capped
+						amount_base_cap, amount_quote_cap = await compute_position_size_usdt_capped(self.adapter, self.settings, price)
+						if amount_quote_cap <= 0 or amount_base_cap <= 0:
+							return "امکان خرید نیست: موجودی/سایز ناکافی"
+						order = await self.adapter.create_market_buy_order(sym, amount_quote_cap)
+						return f"خرید دستی انجام شد: {order}"
 			except Exception as exc:
 				return f"خرید دستی ناموفق بود: {exc}"
 
