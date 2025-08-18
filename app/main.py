@@ -13,6 +13,7 @@ from .exchange_adapter.ccxt_lbank import CcxtLBankAdapter
 from .exchange_adapter.lbank_futures import CcxtLBankFuturesAdapter
 from .exchange_adapter.lbank_native import LBankNativeSpotClient
 from .exchange_adapter.lbank_spot_native_adapter import LBankNativeSpotAdapter
+from .exchange_adapter.lbank_futures_native import LBankNativeFuturesAdapter
 from .strategy.logic import run_tick
 import ccxt.async_support as ccxt  # keep import for runtime
 
@@ -31,7 +32,10 @@ class Worker:
 			raise SystemExit("LBANK_API_KEY and LBANK_API_SECRET are required (live-only mode)")
 		# Choose adapter
 		if self.settings.trade_mode == "futures":
-			self.adapter = CcxtLBankFuturesAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
+			if getattr(self.settings, "lbank_use_native_futures", False):
+				self.adapter = LBankNativeFuturesAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
+			else:
+				self.adapter = CcxtLBankFuturesAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
 		else:
 			if self.settings.lbank_use_native_spot:
 				self.adapter = LBankNativeSpotAdapter(self.settings.lbank_api_key, self.settings.lbank_api_secret)
