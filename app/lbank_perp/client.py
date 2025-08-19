@@ -47,8 +47,31 @@ class LBankPerpClient:
         return resp.json()
 
     # Private examples (actual endpoints should follow LBank Contract API specs)
+    async def _post_json(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        headers, signed = self.signer.build_headers_and_signature(payload)
+        resp = await self.http.post(path, json=signed, headers=headers)
+        return resp.json()
+
     async def account_balance(self) -> Dict[str, Any]:
         base = await self._security_params()
-        headers, signed = self.signer.build_headers_and_signature(base)
-        resp = await self.http.post("cfd/openApi/v1/pri/account/balance", json=signed, headers=headers)
-        return resp.json()
+        # Try a list of documented/variant endpoints; return first non-error response
+        candidates = [
+            "cfd/openApi/v1/pri/account/balance",
+            "cfd/openApi/v1/pri/account/getBalance",
+            "cfd/openApi/v1/pri/account/info",
+            "cfd/openApi/v1/pri/account/getAccountInfo",
+            "cfd/openApi/v1/pri/account/getUserBalance",
+        ]
+        last = None
+        for path in candidates:
+            try:
+                data = await self._post_json(path, base)
+                # If success flag exists and is true, or no error_code
+                if not isinstance(data, dict):
+                    return data
+                if data.get("success") in (True, "true", "True") or "error_code" not in data:
+                    return data
+                last = data
+            except Exception as exc:
+                last = {"error": str(exc), "path": path}
+        return last or {"error": "no_response"}
