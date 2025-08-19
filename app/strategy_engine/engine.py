@@ -188,7 +188,7 @@ class StrategyEngine:
                 "type": order_type,
                 "amount": intent.quantity,
             }
-            # For market, price=0; for limit, pass price
+            # For market, price=0; for limit, require price
             params["price"] = "0" if intent.type == "market" else (intent.price or "0")
             try:
                 resp = await self.spot_client.create_order(params)

@@ -40,20 +40,14 @@ class SpotSigner:
         if "timestamp" not in params or "signature_method" not in params or "echostr" not in params:
             raise ValueError("Missing security parameters: timestamp, signature_method, echostr")
 
-        # Build sign from all fields (including security triplet), excluding sign itself
         pre_md5 = build_pre_md5_string({k: v for k, v in params.items() if k != "sign"})
         md5_u = md5_upper_hex(pre_md5)
         sign = hmac_sha256_hex(self.secret_key, md5_u)
 
-        # Move security fields into headers per LBank requirement
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
-            "timestamp": str(params["timestamp"]),
-            "signature_method": params.get("signature_method", self.signature_method),
-            "echostr": params["echostr"],
         }
-        body = {k: v for k, v in params.items() if k not in {"timestamp", "signature_method", "echostr", "sign"}}
-        body["sign"] = sign
+        body = {**{k: v for k, v in params.items() if k != "sign"}, "sign": sign}
         return headers, body
 
 
@@ -70,10 +64,6 @@ class PerpSigner:
         sign = hmac_sha256_hex(self.secret_key, md5_u)
         headers = {
             "Content-Type": "application/json",
-            "timestamp": str(params["timestamp"]),
-            "signature_method": params.get("signature_method", self.signature_method),
-            "echostr": params["echostr"],
         }
-        body = {k: v for k, v in params.items() if k not in {"timestamp", "signature_method", "echostr", "sign"}}
-        body["sign"] = sign
+        body = {**{k: v for k, v in params.items() if k != "sign"}, "sign": sign}
         return headers, body
