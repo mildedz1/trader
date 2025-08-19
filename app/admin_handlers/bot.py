@@ -76,15 +76,8 @@ class AppState:
 
 def admin_kb(state: AppState) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"Mode: {state.mode}", callback_data="mode:menu")
-    kb.button(text="Spot Balance", callback_data="spot:balance")
     kb.button(text=("Demo: ON" if state.demo else "Demo: OFF"), callback_data="demo:toggle")
     kb.button(text="Demo Report", callback_data="demo:report")
-    kb.button(text="Demo Start Grid", callback_data="demo:start")
-    kb.button(text="Demo Stop Grid", callback_data="demo:stop")
-    kb.button(text="Perp Balance (LBank sample)", callback_data="perp:balance")
-    kb.button(text="Strategies", callback_data="strat:menu")
-    kb.button(text="Time Drift", callback_data="time:drift")
     kb.adjust(1)
     return kb
 
@@ -346,50 +339,6 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             await _safe_edit_text(cb.message, f"Demo report error: {exc}", admin_kb(state).as_markup())
         finally:
             await cb.answer()
-
-    @dp.callback_query(F.data == "demo:start")
-    async def cb_demo_start(cb: CallbackQuery) -> None:
-        if not state.demo:
-            await cb.answer("Demo is OFF", show_alert=True)
-            return
-        # ensure strategies loaded and enable perp BTC grid strategy; switch engine to live
-        if not engine.strategies:
-            engine.load_plugins()
-        names = [x["name"] for x in engine.list()]
-        # ensure perp client is demo perp client and attach to engine
-        demo_perp = DemoPerpClient(initial_balance_usdt=200000.0, symbol="BTC_USDT", leverage=10.0)
-        await demo_perp.open()
-        state.perp_client = demo_perp  # type: ignore[assignment]
-        engine.perp_client = demo_perp  # type: ignore[assignment]
-        found = False
-        for nm in names:
-            if nm.endswith("grid_perp_btc"):
-                engine.set_enabled(nm, True)
-                found = True
-        if not found:
-            # try to load module directly
-            try:
-                import importlib
-                mod = importlib.import_module("app.strategies.grid_perp_btc")
-                if hasattr(mod, "get_strategy"):
-                    plugin = mod.get_strategy()
-                    engine.register("grid_perp_btc", plugin)
-                    engine.set_enabled("grid_perp_btc", True)
-            except Exception:
-                pass
-        engine.mode = "live"
-        await _safe_edit_text(cb.message, "Demo futures BTC grid started (engine=live)", admin_kb(state).as_markup())
-        await cb.answer()
-
-    @dp.callback_query(F.data == "demo:stop")
-    async def cb_demo_stop(cb: CallbackQuery) -> None:
-        # disable all strategies and set engine to signal
-        names = [x["name"] for x in engine.list()]
-        for nm in names:
-            engine.set_enabled(nm, False)
-        engine.mode = "signal"
-        await _safe_edit_text(cb.message, "Demo grid stopped (engine=signal)", admin_kb(state).as_markup())
-        await cb.answer()
 
     @dp.callback_query(F.data == "strat:menu")
     async def cb_strat_menu(cb: CallbackQuery) -> None:
