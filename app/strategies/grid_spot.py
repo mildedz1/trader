@@ -21,8 +21,8 @@ class GridConfig:
     recalc_sec: int = 5
     default_stop_loss_pct: float = 0.02
     default_take_profit_pct: float = 0.02
-    order_sizing: str = "static"  # "static" | "balance_pct"
-    balance_pct_per_order: float = 0.5  # percent of free quote per order if balance_pct
+    order_sizing: str = "balance_pct"  # "static" | "balance_pct"
+    balance_pct_per_order: float = 10.0  # percent of free quote per order if balance_pct
     cadence_sec: int = 300  # resend signal pack every N seconds even if no recenter
 
 
