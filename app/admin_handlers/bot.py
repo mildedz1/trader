@@ -20,7 +20,7 @@ from app.strategy_engine.engine import StrategyEngine
 
 class AppState:
     def __init__(self) -> None:
-        self.mode: str = "paper"  # paper/dry-run/live
+        self.mode: str = "signal"  # signal/live
         self.spot_time = TimeSynchronizer(fetch_server_ms=fetch_spot_server_time_ms)
         self.spot_client: LBankSpotClient | None = None
         self.perp_time = TimeSynchronizer(fetch_server_ms=fetch_perp_server_time_ms)
@@ -78,11 +78,11 @@ def admin_kb(state: AppState) -> InlineKeyboardBuilder:
 
 def mode_kb(current: str) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    for m in ("paper", "dry-run", "live"):
+    for m in ("signal", "live"):
         prefix = "✅ " if m == current else ""
         kb.button(text=f"{prefix}{m}", callback_data=f"mode:set:{m}")
     kb.button(text="⬅️ Back", callback_data="admin:home")
-    kb.adjust(3, 1)
+    kb.adjust(2, 1)
     return kb
 
 
@@ -188,6 +188,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
     async def cb_mode_set(cb: CallbackQuery) -> None:
         mode = cb.data.split(":", 2)[2]
         state.mode = mode
+        engine.mode = mode
         await cb.message.edit_text("Mode updated.", reply_markup=admin_kb(state).as_markup())
         await cb.answer("Mode set to %s" % mode)
 

@@ -116,8 +116,13 @@ class StrategyEngine:
                     intents = await plugin.on_signal(ctx)
                     for intent in intents:
                         ok = await plugin.risk_check(ctx, intent)
-                        if ok:
+                        if not ok:
+                            continue
+                        # In signal mode, only notify; in live, place real orders via integration point
+                        if self.mode == "signal":
                             await self._submit_order(intent, name)
+                        else:  # live
+                            await self._place_live(intent, name)
                 except Exception as exc:
                     logger.error("strategy.tick.error", name=name, error=str(exc))
             await asyncio.sleep(1.0)
@@ -138,6 +143,26 @@ class StrategyEngine:
             }
             try:
                 await self.notifier("order_intent", payload)
+            except Exception:
+                pass
+
+    async def _place_live(self, intent: OrderIntent, strategy_name: str) -> None:
+        # TODO: integrate with LBank order queue respecting rate limits
+        # For now, reuse notifier to mark as live placeholder
+        logger.info("strategy.order.live", intent=intent.__dict__)
+        if self.notifier is not None:
+            payload = {
+                "event": "order_live",
+                "strategy": strategy_name,
+                "symbol": intent.symbol,
+                "side": intent.side,
+                "type": intent.type,
+                "quantity": intent.quantity,
+                "price": intent.price,
+                "clientOrderId": intent.client_order_id,
+            }
+            try:
+                await self.notifier("order_live", payload)
             except Exception:
                 pass
 
