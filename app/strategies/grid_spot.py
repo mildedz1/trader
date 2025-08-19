@@ -153,8 +153,8 @@ class GridSpotStrategy:
                         out.append(_format_decimal(prices[i]))
                         seen.add(i)
                 return out
-            picked_buys = pick(buys, 3)
-            picked_sells = pick(sells, 3)
+            picked_buys = pick(buys, 6)
+            picked_sells = pick(sells, 6)
             for ps in picked_buys:
                 add_intent("buy", ps)
                 self._active_prices[ps] = "buy"

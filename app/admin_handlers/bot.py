@@ -134,8 +134,8 @@ async def run_bot(stop_event: asyncio.Event) -> None:
                         seen.add(i)
                 return picked
 
-            buys = pick_levels(buys, 3)
-            sells = pick_levels(sells, 3)
+            buys = pick_levels(buys, 6)
+            sells = pick_levels(sells, 6)
 
             # center reference if available
             desc = payload.get("desc") or {}
