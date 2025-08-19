@@ -109,9 +109,10 @@ class GridSpotStrategy:
             else:
                 quote_budget = self.cfg.quote_per_order
             amt = quote_budget / price
-            if side == "sell" and free_base is not None and len(sells) > 0:
-                # do not exceed per-order base capacity
-                amt = min(amt, max(0.0, free_base / len(sells)))
+            # In signal mode, don't cap sells by balance; in live, cap by base
+            if ctx.mode == "live":
+                if side == "sell" and free_base is not None and len(sells) > 0:
+                    amt = min(amt, max(0.0, free_base / len(sells)))
             return max(0.0, amt)
 
         def add_intent(side: str, price_str: str) -> None:

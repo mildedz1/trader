@@ -124,12 +124,24 @@ class StrategyEngine:
                     if not permitted:
                         continue
                     if self.mode == "signal":
-                        await self._notify_batch(name, permitted, live=False)
+                        # Split by side to avoid mixed confusing packs
+                        buys = [i for i in permitted if i.side == "buy"]
+                        sells = [i for i in permitted if i.side == "sell"]
+                        if buys:
+                            await self._notify_batch(name, buys, live=False)
+                        if sells:
+                            await self._notify_batch(name, sells, live=False)
                     else:  # live
                         # Place live orders; also send batch notification
                         for intent in permitted:
                             await self._place_live(intent, name)
-                        await self._notify_batch(name, permitted, live=True)
+                        # notify by side
+                        buys = [i for i in permitted if i.side == "buy"]
+                        sells = [i for i in permitted if i.side == "sell"]
+                        if buys:
+                            await self._notify_batch(name, buys, live=True)
+                        if sells:
+                            await self._notify_batch(name, sells, live=True)
                 except Exception as exc:
                     logger.error("strategy.tick.error", name=name, error=str(exc))
             await asyncio.sleep(1.0)
