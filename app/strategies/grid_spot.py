@@ -58,7 +58,8 @@ class GridSpotStrategy:
         self._center = price
         buys, sells, lo, up = _build_levels(price, self.cfg)
         self._band = (lo, up)
-        self._active_prices = {**{_format_decimal(p): "buy" for p in buys}, **{_format_decimal(p): "sell" for p in sells}}
+        # Do NOT pre-populate active levels; emit initial placement intents in on_signal
+        self._active_prices.clear()
 
     async def on_tick(self, ctx, market: Dict[str, Any]) -> None:
         now = time.time()
@@ -76,8 +77,8 @@ class GridSpotStrategy:
             self._center = last
             buys, sells, lo, up = _build_levels(last, self.cfg)
             self._band = (lo, up)
+            # Clear so on_signal will emit refreshed grid placement intents
             self._active_prices.clear()
-            self._active_prices.update({**{_format_decimal(p): "buy" for p in buys}, **{_format_decimal(p): "sell" for p in sells}})
         elif (not self.cfg.recenter_on_break) and self._center:
             dist = abs(last - self._center) / self._center
             if dist > self.cfg.kill_switch_pct:
