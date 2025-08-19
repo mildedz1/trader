@@ -30,6 +30,7 @@ class LBankSpotClient:
     async def _security_params(self) -> Dict[str, str]:
         ts = self.time_sync.now_ms()
         return {
+            "api_key": self.api_key,
             "timestamp": str(ts),
             "signature_method": "HmacSHA256",
             "echostr": random_echostr(32),
