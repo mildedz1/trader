@@ -10,7 +10,7 @@ from app.strategy_engine.engine import OrderIntent
 
 @dataclass
 class GridConfig:
-    symbol: str = "btc_usdt"  # LBank spot symbol style
+    symbol: str = "trx_usdt"  # LBank spot symbol style
     levels_per_side: int = 6
     mode: str = "percent"  # 'percent' | 'arithmetic'
     upper_pct: float = 0.03
