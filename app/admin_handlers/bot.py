@@ -10,10 +10,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.config.settings import settings
 from app.logging import logger
-from app.lbank_spot.time_source import fetch_spot_server_time_ms
+from app.mexc_spot.time_source import fetch_spot_server_time_ms
 from app.lbank_perp.time_source import fetch_perp_server_time_ms
 from app.time_sync import TimeSynchronizer
-from app.lbank_spot import LBankSpotClient
+from app.mexc_spot import MexcSpotClient
 from app.lbank_perp import LBankPerpClient
 from app.strategy_engine.engine import StrategyEngine
 
@@ -22,7 +22,7 @@ class AppState:
     def __init__(self) -> None:
         self.mode: str = "signal"  # signal/live
         self.spot_time = TimeSynchronizer(fetch_server_ms=fetch_spot_server_time_ms)
-        self.spot_client: LBankSpotClient | None = None
+        self.spot_client: MexcSpotClient | None = None
         self.perp_time = TimeSynchronizer(fetch_server_ms=fetch_perp_server_time_ms)
         self.perp_client: LBankPerpClient | None = None
         self._bg_tasks: list[asyncio.Task] = []
@@ -30,10 +30,10 @@ class AppState:
     async def start(self) -> None:
         await self.spot_time.refresh()
         await self.perp_time.refresh()
-        if settings.lbank_spot_api_key and settings.lbank_spot_secret_key:
-            self.spot_client = LBankSpotClient(
-                api_key=settings.lbank_spot_api_key,
-                secret_key=settings.lbank_spot_secret_key,
+        if settings.mexc_spot_api_key and settings.mexc_spot_secret_key:
+            self.spot_client = MexcSpotClient(
+                api_key=settings.mexc_spot_api_key,
+                secret_key=settings.mexc_spot_secret_key,
                 time_sync=self.spot_time,
             )
             await self.spot_client.open()
@@ -74,7 +74,7 @@ def admin_kb(state: AppState) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text=f"Mode: {state.mode}", callback_data="mode:menu")
     kb.button(text="Spot Balance", callback_data="spot:balance")
-    kb.button(text="Perp Balance", callback_data="perp:balance")
+    kb.button(text="Perp Balance (LBank sample)", callback_data="perp:balance")
     kb.button(text="Strategies", callback_data="strat:menu")
     kb.button(text="Time Drift", callback_data="time:drift")
     kb.adjust(1)
@@ -241,7 +241,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
 
     @dp.message(Command("start"))
     async def on_start(message: Message) -> None:
-        await message.answer("LBank trader bot is running. Use /admin")
+        await message.answer("MEXC trader bot is running. Use /admin")
 
     @dp.message(Command("status"))
     async def on_status(message: Message) -> None:

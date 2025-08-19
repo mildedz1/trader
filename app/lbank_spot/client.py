@@ -14,6 +14,7 @@ SPOT_BASE_URLS = ["https://api.lbkex.com/", "https://api.lbank.info/"]
 
 
 class LBankSpotClient:
+    # Deprecated: kept for reference migration; not used in app runtime
     def __init__(self, api_key: str, secret_key: str, time_sync: TimeSynchronizer, base_url: str | None = None) -> None:
         self.api_key = api_key
         self.signer = SpotSigner(secret_key=secret_key)

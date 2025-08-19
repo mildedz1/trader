@@ -17,11 +17,9 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = Field(alias="TELEGRAM_BOT_TOKEN")
 
-    lbank_spot: ApiKeyConfig = Field(default_factory=ApiKeyConfig, alias="LBANK_SPOT")
-    lbank_spot_api_key: str | None = Field(default=None, alias="LBANK_SPOT_API_KEY")
-    lbank_spot_secret_key: str | None = Field(default=None, alias="LBANK_SPOT_SECRET_KEY")
-    lbank_spot_rsa_private_base64: str | None = Field(default=None, alias="LBANK_SPOT_RSA_PRIVATE_BASE64")
-    lbank_spot_rsa_public_base64: str | None = Field(default=None, alias="LBANK_SPOT_RSA_PUBLIC_BASE64")
+    # MEXC spot
+    mexc_spot_api_key: str | None = Field(default=None, alias="MEXC_SPOT_API_KEY")
+    mexc_spot_secret_key: str | None = Field(default=None, alias="MEXC_SPOT_SECRET_KEY")
 
     lbank_perp_api_key: str | None = Field(default=None, alias="LBANK_PERP_API_KEY")
     lbank_perp_secret_key: str | None = Field(default=None, alias="LBANK_PERP_SECRET_KEY")
@@ -40,10 +38,8 @@ class Settings(BaseSettings):
 
     def get_spot_keys(self) -> ApiKeyConfig:
         return ApiKeyConfig(
-            api_key=self.lbank_spot_api_key,
-            secret_key=self.lbank_spot_secret_key,
-            rsa_private_base64=self.lbank_spot_rsa_private_base64,
-            rsa_public_base64=self.lbank_spot_rsa_public_base64,
+            api_key=self.mexc_spot_api_key,
+            secret_key=self.mexc_spot_secret_key,
         )
 
     def get_perp_keys(self) -> ApiKeyConfig:

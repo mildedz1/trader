@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: lbank-telegram-trader:latest
+    image: mexc-telegram-trader:latest
     restart: unless-stopped
     env_file:
       - .env

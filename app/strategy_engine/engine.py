@@ -180,11 +180,11 @@ class StrategyEngine:
             await self._ratelimiter.acquire("trade")
             order_type = None
             if intent.type == "market":
-                # LBank market orders: use explicit buy_market / sell_market
-                order_type = "buy_market" if intent.side == "buy" else "sell_market"
+                # MEXC uses MARKET type
+                order_type = "MARKET"
             else:
-                # Spot V2 supplement recommends buy/sell for limit
-                order_type = "buy" if intent.side == "buy" else "sell"
+                # MEXC uses LIMIT type
+                order_type = "LIMIT"
             # Prefer canonical symbol if available
             used_symbol = intent.symbol
             try:
@@ -195,26 +195,28 @@ class StrategyEngine:
             params: Dict[str, str] = {
                 "symbol": used_symbol,
                 "type": order_type,
-                "amount": intent.quantity,
+                "side": ("BUY" if intent.side == "buy" else "SELL"),
+                "quantity": intent.quantity,
             }
-            # LBank official: omit price for market orders; include for limit
+            # For limit orders include price; for market omit
             if intent.type == "limit":
                 used_price = intent.price or "0"
                 params["price"] = used_price
             else:
                 used_price = "-"
-            # Pass through client order id if provided (LBank supports custom_id)
+            # Client order id passthrough
             if intent.client_order_id:
-                params["custom_id"] = intent.client_order_id
+                params["clientOrderId"] = intent.client_order_id
             try:
                 resp = await self.spot_client.create_order(params)
                 ok = False
                 msg = None
                 code = None
                 if isinstance(resp, dict):
-                    ok = bool(resp.get("success") in (True, "true", "True") or resp.get("result") in (True, "true", "True"))
+                    # MEXC typically returns order object or error with code/msg
+                    ok = not ("code" in resp and resp.get("code") not in ("0", 0))
                     msg = resp.get("msg") or resp.get("message")
-                    code = resp.get("error_code") or resp.get("code")
+                    code = resp.get("code")
                 if ok:
                     if self.notifier is not None:
                         await self.notifier("order_placed", {

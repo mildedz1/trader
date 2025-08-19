@@ -45,3 +45,7 @@ class HttpClient:
         if json is not None:
             return await self._client.post(path, json=json, headers=headers)
         return await self._client.post(path, data=data, headers=headers)
+
+    async def delete(self, path: str, params: Dict[str, Any] | None = None, headers: Dict[str, str] | None = None) -> httpx.Response:
+        assert self._client is not None
+        return await self._client.delete(path, params=params, headers=headers)
