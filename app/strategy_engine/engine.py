@@ -275,8 +275,9 @@ class StrategyEngine:
     async def stop(self) -> None:
         if self._bg_task:
             self._bg_task.cancel()
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._bg_task
+            self._bg_task = None
 
     async def describe_all(self) -> List[Dict[str, Any]]:
         ctx = self._build_ctx()

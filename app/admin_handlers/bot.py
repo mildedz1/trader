@@ -59,6 +59,11 @@ class AppState:
     async def stop(self) -> None:
         for t in self._bg_tasks:
             t.cancel()
+        for t in self._bg_tasks:
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
         if self.spot_client:
             await self.spot_client.close()
         if self.perp_client:
@@ -378,6 +383,9 @@ async def run_bot(stop_event: asyncio.Event) -> None:
     async def _runner() -> None:
         try:
             await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), stop_event=stop_event)
+        except asyncio.CancelledError:
+            # Suppress on shutdown
+            pass
         finally:
             await engine.stop()
             await state.stop()
