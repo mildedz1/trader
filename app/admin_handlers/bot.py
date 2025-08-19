@@ -115,6 +115,18 @@ async def run_bot(stop_event: asyncio.Event) -> None:
     state = AppState()
     await state.start()
 
+    async def _safe_edit_text(message, text: str, markup) -> None:
+        try:
+            await message.edit_text(text, reply_markup=markup)
+        except Exception as exc:
+            if "message is not modified" in str(exc):
+                try:
+                    await message.edit_reply_markup(reply_markup=markup)
+                except Exception:
+                    pass
+            else:
+                raise
+
     async def notify(event: str, payload: dict) -> None:
         # send to all admins; format Persian messages with compact, tabular batches
         def fmt_qty(q):
@@ -281,7 +293,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
 
     @dp.callback_query(F.data == "admin:home")
     async def cb_admin_home(cb: CallbackQuery) -> None:
-        await cb.message.edit_text("Admin Dashboard", reply_markup=admin_kb(state).as_markup())
+        await _safe_edit_text(cb.message, "Admin Dashboard", admin_kb(state).as_markup())
         await cb.answer()
 
     @dp.callback_query(F.data == "demo:toggle")
@@ -312,7 +324,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             engine.spot_client = state.spot_client
         except Exception:
             pass
-        await cb.message.edit_text("Admin Dashboard", reply_markup=admin_kb(state).as_markup())
+        await _safe_edit_text(cb.message, "Admin Dashboard", admin_kb(state).as_markup())
         await cb.answer("Demo mode: %s" % ("ON" if state.demo else "OFF"))
 
     @dp.callback_query(F.data == "demo:report")
@@ -326,9 +338,9 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             txt = json.dumps(rep, ensure_ascii=False, indent=2)
             if len(txt) > 3500:
                 txt = txt[:3500] + "..."
-            await cb.message.edit_text(txt, reply_markup=admin_kb(state).as_markup())
+            await _safe_edit_text(cb.message, txt, admin_kb(state).as_markup())
         except Exception as exc:
-            await cb.message.edit_text(f"Demo report error: {exc}", reply_markup=admin_kb(state).as_markup())
+            await _safe_edit_text(cb.message, f"Demo report error: {exc}", admin_kb(state).as_markup())
         finally:
             await cb.answer()
 
@@ -354,7 +366,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             if nm.endswith("grid_perp_btc"):
                 engine.set_enabled(nm, True)
         engine.mode = "live"
-        await cb.message.edit_text("Demo futures BTC grid started (engine=live)", reply_markup=admin_kb(state).as_markup())
+        await _safe_edit_text(cb.message, "Demo futures BTC grid started (engine=live)", admin_kb(state).as_markup())
         await cb.answer()
 
     @dp.callback_query(F.data == "demo:stop")
@@ -364,7 +376,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
         for nm in names:
             engine.set_enabled(nm, False)
         engine.mode = "signal"
-        await cb.message.edit_text("Demo grid stopped (engine=signal)", reply_markup=admin_kb(state).as_markup())
+        await _safe_edit_text(cb.message, "Demo grid stopped (engine=signal)", admin_kb(state).as_markup())
         await cb.answer()
 
     @dp.callback_query(F.data == "strat:menu")
