@@ -55,6 +55,7 @@ class GridSpotStrategy:
     _band: Tuple[float, float] | None = None
     _last_recalc_ts: float = 0.0
     _last_signal_ts: float = 0.0
+    _recenter_pending: bool = False
     _active_prices: Dict[str, str] = field(default_factory=dict)  # price -> side
 
     async def on_startup(self, ctx) -> None:
@@ -66,6 +67,7 @@ class GridSpotStrategy:
         self._band = (lo, up)
         # Do NOT pre-populate active levels; emit initial placement intents in on_signal
         self._active_prices.clear()
+        self._recenter_pending = True
 
     async def on_tick(self, ctx, market: Dict[str, Any]) -> None:
         now = time.time()
@@ -85,6 +87,7 @@ class GridSpotStrategy:
             self._band = (lo, up)
             # Clear so on_signal will emit refreshed grid placement intents
             self._active_prices.clear()
+            self._recenter_pending = True
         elif (not self.cfg.recenter_on_break) and self._center:
             dist = abs(last - self._center) / self._center
             if dist > self.cfg.kill_switch_pct:
@@ -99,7 +102,6 @@ class GridSpotStrategy:
         desired = {**{_format_decimal(p): "buy" for p in buys}, **{_format_decimal(p): "sell" for p in sells}}
 
         now = time.time()
-        cadence_due = (now - self._last_signal_ts) >= self.cfg.cadence_sec if self.cfg.cadence_sec > 0 else False
 
         # Determine sizing from balance if requested
         free_quote, free_base = await self._get_free_balances(ctx)
@@ -135,8 +137,8 @@ class GridSpotStrategy:
                 )
             )
 
-        if cadence_due:
-            # pick at most 3 evenly spaced per side
+        if self._recenter_pending or not self._active_prices:
+            # Emit initial/recenter pack: pick at most 3 evenly spaced per side
             def pick(prices: List[float], k: int) -> List[str]:
                 n = len(prices)
                 if n <= k:
@@ -149,16 +151,15 @@ class GridSpotStrategy:
                         out.append(_format_decimal(prices[i]))
                         seen.add(i)
                 return out
-            for ps in pick(buys, 3):
+            picked_buys = pick(buys, 3)
+            picked_sells = pick(sells, 3)
+            for ps in picked_buys:
                 add_intent("buy", ps)
-            for ps in pick(sells, 3):
+                self._active_prices[ps] = "buy"
+            for ps in picked_sells:
                 add_intent("sell", ps)
-        else:
-            # Place missing levels compared to active set
-            for price_str, side in desired.items():
-                if price_str not in self._active_prices:
-                    add_intent(side, price_str)
-                    self._active_prices[price_str] = side
+                self._active_prices[ps] = "sell"
+            self._recenter_pending = False
 
         if intents:
             self._last_signal_ts = now
