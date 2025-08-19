@@ -16,6 +16,8 @@ from app.lbank_perp.time_source import fetch_perp_server_time_ms
 from app.time_sync import TimeSynchronizer
 from app.coinex_spot import CoinexSpotClient
 from app.lbank_perp import LBankPerpClient
+from app.demo.spot_client import DemoSpotClient
+from app.demo.perp_client import DemoPerpClient
 from app.strategy_engine.engine import StrategyEngine
 
 
@@ -300,16 +302,20 @@ async def run_bot(stop_event: asyncio.Event) -> None:
                 await state.spot_client.close()  # type: ignore[func-returns-value]
         except Exception:
             pass
-        # re-init
-        if settings.coinex_access_id and settings.coinex_secret_key:
-            state.spot_client = CoinexSpotClient(
-                access_id=settings.coinex_access_id,
-                secret_key=settings.coinex_secret_key,
-                time_sync=state.spot_time,
-            )
+        # re-init spot: demo or real
+        if state.demo:
+            state.spot_client = DemoSpotClient(initial_balances={"USDT": 200000.0})
             await state.spot_client.open()
         else:
-            state.spot_client = None
+            if settings.coinex_access_id and settings.coinex_secret_key:
+                state.spot_client = CoinexSpotClient(
+                    access_id=settings.coinex_access_id,
+                    secret_key=settings.coinex_secret_key,
+                    time_sync=state.spot_time,
+                )
+                await state.spot_client.open()
+            else:
+                state.spot_client = None
         # point engine to the current spot client
         try:
             engine.spot_client = state.spot_client
@@ -351,14 +357,10 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             engine.load_plugins()
         names = [x["name"] for x in engine.list()]
         # ensure perp client is demo perp client and attach to engine
-        try:
-            from app.mexc_perp import MexcPerpDemoClient  # type: ignore
-            demo_perp = MexcPerpDemoClient(initial_balance_usdt=200000.0, symbol="BTC_USDT")
-            await demo_perp.open()
-            state.perp_client = demo_perp  # type: ignore[assignment]
-            engine.perp_client = demo_perp  # type: ignore[assignment]
-        except Exception:
-            pass
+        demo_perp = DemoPerpClient(initial_balance_usdt=200000.0, symbol="BTC_USDT", leverage=10.0)
+        await demo_perp.open()
+        state.perp_client = demo_perp  # type: ignore[assignment]
+        engine.perp_client = demo_perp  # type: ignore[assignment]
         found = False
         for nm in names:
             if nm.endswith("grid_perp_btc"):
