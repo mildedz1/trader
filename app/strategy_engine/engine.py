@@ -26,6 +26,7 @@ class StrategyPlugin(Protocol):
     async def on_tick(self, ctx: "StrategyContext", market: Dict[str, Any]) -> None: ...
     async def on_signal(self, ctx: "StrategyContext") -> List[OrderIntent]: ...
     async def risk_check(self, ctx: "StrategyContext", order: OrderIntent) -> bool: ...
+    async def describe(self, ctx: "StrategyContext") -> Dict[str, Any]: ...
 
 
 @dataclass
@@ -87,13 +88,16 @@ class StrategyEngine:
                 logger.error("strategy.load.error", module=modname, error=str(exc))
         return loaded
 
-    async def _loop(self) -> None:
-        ctx = StrategyContext(
+    def _build_ctx(self) -> StrategyContext:
+        return StrategyContext(
             mode=self.mode,
             spot_client=self.spot_client,
             perp_client=self.perp_client,
             submit_order=self._submit_order,
         )
+
+    async def _loop(self) -> None:
+        ctx = self._build_ctx()
         # Startup hooks
         for name, plugin in self.strategies.items():
             try:
@@ -129,4 +133,15 @@ class StrategyEngine:
             self._bg_task.cancel()
             with contextlib.suppress(Exception):
                 await self._bg_task
+
+    async def describe_all(self) -> List[Dict[str, Any]]:
+        ctx = self._build_ctx()
+        items: List[Dict[str, Any]] = []
+        for name, plugin in self.strategies.items():
+            try:
+                d = await plugin.describe(ctx)
+            except Exception as exc:
+                d = {"error": str(exc)}
+            items.append({"name": name, "enabled": self.enabled.get(name, False), **d})
+        return items
 

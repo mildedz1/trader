@@ -132,6 +132,31 @@ class GridSpotStrategy:
             return None
         return None
 
+    async def describe(self, ctx) -> Dict[str, Any]:
+        # Show required conditions and current state
+        last = await self._fetch_last_price(ctx)
+        buys, sells, lo, up = ([], [], None, None)
+        if self._center is not None:
+            b, s, l, u = _build_levels(self._center, self.cfg)
+            buys, sells, lo, up = b, s, l, u
+        return {
+            "scope": self.scope,
+            "symbol": self.cfg.symbol,
+            "required": {
+                "min_notional_usdt": 5.0,
+                "levels_per_side": self.cfg.levels_per_side,
+                "grid_band_pct": [self.cfg.lower_pct, self.cfg.upper_pct],
+                "recenter_on_break": self.cfg.recenter_on_break,
+            },
+            "current": {
+                "center": self._center,
+                "band": [lo, up] if lo and up else None,
+                "last_price": last,
+                "active_levels": len(self._active_prices),
+            },
+            "ready": bool(self._center and last),
+        }
+
 
 def get_strategy():
     return GridSpotStrategy()

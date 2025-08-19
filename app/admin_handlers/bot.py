@@ -135,7 +135,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
         lines = ["Strategies:"]
         for it in items:
             lines.append(f"- {it['name']} [{it['scope']}] => {'ON' if it['enabled'] else 'OFF'}")
-        lines.append("\nToggle: /strat_toggle <name>")
+        lines.append("\nToggle: /strat_toggle <name> | Describe: /strat_desc <name>")
         await cb.message.edit_text("\n".join(lines), reply_markup=admin_kb(state).as_markup())
         await cb.answer()
 
@@ -155,6 +155,27 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             return
         engine.set_enabled(cur["name"], not cur["enabled"])
         await message.answer(f"{cur['name']} => {'ON' if not cur['enabled'] else 'OFF'}")
+
+    @dp.message(F.text.startswith("/strat_desc"))
+    async def on_strat_desc(message: Message) -> None:
+        if not is_admin(message.from_user.id if message.from_user else None):
+            await message.answer("Unauthorized")
+            return
+        parts = message.text.strip().split()
+        if len(parts) < 2:
+            await message.answer("Usage: /strat_desc <name>")
+            return
+        name = parts[1]
+        all_desc = await engine.describe_all()
+        item = next((x for x in all_desc if x["name"].endswith(name) or x["name"] == name), None)
+        if not item:
+            await message.answer("Strategy not found")
+            return
+        import json
+        txt = json.dumps(item, ensure_ascii=False, indent=2)
+        if len(txt) > 3500:
+            txt = txt[:3500] + "..."
+        await message.answer(f"```\n{txt}\n```", parse_mode="MarkdownV2")
 
     @dp.callback_query(F.data == "mode:menu")
     async def cb_mode_menu(cb: CallbackQuery) -> None:
