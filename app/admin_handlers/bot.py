@@ -403,8 +403,11 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             kb.button(text=f"🔎 {it['name']}", callback_data=f"strat:desc:{it['name']}")
         kb.button(text="⬅️ Back", callback_data="admin:home")
         kb.adjust(2, 1)
-        await cb.message.edit_text("Strategies:", reply_markup=kb.as_markup())
-        await cb.answer()
+        try:
+            await cb.answer()
+        except Exception:
+            pass
+        await _safe_edit_text(cb.message, "Strategies:", kb.as_markup())
 
     @dp.callback_query(F.data.startswith("strat:toggle:"))
     async def cb_strat_toggle(cb: CallbackQuery) -> None:
@@ -429,8 +432,11 @@ async def run_bot(stop_event: asyncio.Event) -> None:
         txt = json.dumps(item, ensure_ascii=False, indent=2)
         if len(txt) > 3500:
             txt = txt[:3500] + "..."
-        await cb.message.edit_text(txt, reply_markup=admin_kb(state).as_markup())
-        await cb.answer()
+        try:
+            await cb.answer()
+        except Exception:
+            pass
+        await _safe_edit_text(cb.message, txt, admin_kb(state).as_markup())
 
     @dp.callback_query(F.data == "mode:menu")
     async def cb_mode_menu(cb: CallbackQuery) -> None:
