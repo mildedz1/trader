@@ -143,7 +143,11 @@ class LBankSpotClient:
             return resp.json()
 
         # Try primary base first
-        out = await _post_with(self.http, data)
+        try:
+            out = await _post_with(self.http, data)
+        except Exception as exc:
+            # Network/DNS error: try alternates immediately
+            out = {"error_code": -1, "msg": str(exc)}
         # Fallback attempts if currency pair nonsupport: try lowercase and uppercase variants
         try:
             code = (out or {}).get("error_code")

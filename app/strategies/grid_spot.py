@@ -15,17 +15,17 @@ class GridConfig:
     mode: str = "percent"  # 'percent' | 'arithmetic'
     upper_pct: float = 0.03
     lower_pct: float = 0.03
-    quote_per_order: float = 20.0
+    quote_per_order: float = 10.0
     recenter_on_break: bool = True
     kill_switch_pct: float = 0.06
     recalc_sec: int = 5
     default_stop_loss_pct: float = 0.02
     default_take_profit_pct: float = 0.02
-    order_sizing: str = "fixed_total_pct"  # "static" | "balance_pct" | "fixed_total_pct"
+    order_sizing: str = "static"  # "static" | "balance_pct" | "fixed_total_pct"
     balance_pct_per_order: float = 10.0  # percent of free quote per order if balance_pct
-    total_budget_usdt: float = 2.8  # used when order_sizing = fixed_total_pct
+    total_budget_usdt: float = 100.0  # used when order_sizing = fixed_total_pct
     per_order_pct_of_total: float = 20.0  # percent of total budget per order
-    min_notional_usdt: float = 0.0  # min notional for live; in signal mode ignored
+    min_notional_usdt: float = 5.0  # min notional for live; in signal mode ignored
     order_kind: str = "limit"  # "limit" | "market"
     cadence_sec: int = 300  # resend signal pack every N seconds even if no recenter
 
