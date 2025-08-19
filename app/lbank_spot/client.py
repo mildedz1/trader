@@ -10,7 +10,14 @@ from app.time_sync import TimeSynchronizer
 from app.logging import logger
 
 
-SPOT_BASE_URLS = ["https://api.lbkex.com/", "https://api.lbank.info/"]
+SPOT_BASE_URLS = [
+    "https://api.lbkex.com/",
+    "https://api.lbank.info/",
+    # Some regions route supplement endpoints differently
+    "https://api.lbkex.net/",
+    # Web domain sometimes carries private endpoints
+    "https://www.lbkex.net/",
+]
 
 
 class LBankSpotClient:
@@ -54,8 +61,25 @@ class LBankSpotClient:
             sym = await self.normalize_symbol(symbol)
         except Exception:
             sym = symbol
-        resp = await self.http.get("v2/supplement/ticker/price.do", params={"symbol": sym})
-        return resp.json()
+        # Try multiple official endpoints to maximize compatibility across regions/versions
+        endpoints = [
+            ("v2/supplement/ticker/price.do", {"symbol": sym}),
+            ("v2/supplement/ticker/bookTicker.do", {"symbol": sym}),
+            ("v2/supplement/ticker/24hr.do", {"symbol": sym}),
+            ("v2/ticker/24hr.do", {"symbol": sym}),
+            ("v2/ticker.do", {"symbol": sym}),
+        ]
+        last_exc: Optional[Exception] = None
+        for path, params in endpoints:
+            try:
+                resp = await self.http.get(path, params=params)
+                return resp.json()
+            except Exception as exc:
+                last_exc = exc
+                continue
+        if last_exc:
+            raise last_exc
+        return {}
 
     async def ticker_24hr(self, symbol: str | None = None) -> Dict[str, Any]:
         params: Dict[str, Any] = {}
@@ -110,15 +134,36 @@ class LBankSpotClient:
                 data["symbol"] = primary_symbol
             except Exception:
                 pass
-        headers, signed = self.signer.build_headers_and_signature(data)
-        resp = await self.http.post("v2/supplement/create_order.do", data=signed, headers=headers)
-        out = resp.json()
+        # Normalize order type: use buy/sell only; market indicated by price=0
+        t = str(data.get("type", "")).lower()
+        if t in ("buy_market", "sell_market"):
+            data["type"] = "buy" if "buy" in t else "sell"
+            data["price"] = "0"
+        async def _post_with(http: HttpClient, payload: Dict[str, str], path: str) -> Dict[str, Any]:
+            headers, signed = self.signer.build_headers_and_signature(payload)
+            resp = await http.post(path, data=signed, headers=headers)
+            return resp.json()
+
+        # Try primary base first
+        try:
+            out = await _post_with(self.http, data, "v2/supplement/create_order.do")
+        except Exception as exc:
+            # Network/DNS error: try alternates immediately
+            out = {"error_code": -1, "msg": str(exc)}
+
         # Fallback attempts if currency pair nonsupport: try lowercase and uppercase variants
         try:
             code = (out or {}).get("error_code")
         except Exception:
             code = None
         if code == 10008 and data.get("symbol"):
+            # Pre-check against known pairs to provide clearer diagnostics
+            try:
+                pairs = await self.currency_pairs()
+                if str(data.get("symbol", "")).lower() not in pairs:
+                    return {"error_code": 10008, "msg": "currency pair nonsupport (precheck)", "symbol": data.get("symbol")}
+            except Exception:
+                pass
             sym = str(data["symbol"])
             candidates = []
             if primary_symbol and primary_symbol != sym:
@@ -127,17 +172,105 @@ class LBankSpotClient:
                 candidates.append(sym.lower())
             if sym.upper() != sym:
                 candidates.append(sym.upper())
+            # Try alternate separators
+            def alt_seps(s: str) -> list[str]:
+                out_syms: list[str] = []
+                s_low = s.lower()
+                base, quote = (s_low.split("_", 1) if "_" in s_low else (s_low, ""))
+                if quote:
+                    out_syms += [
+                        f"{base}_{quote}",
+                        f"{base}-{quote}",
+                        f"{base}/{quote}",
+                        f"{base.upper()}_{quote.upper()}",
+                        f"{base.upper()}-{quote.upper()}",
+                        f"{base.upper()}/{quote.upper()}",
+                    ]
+                return out_syms
+            for altf in alt_seps(sym):
+                if altf not in candidates:
+                    candidates.append(altf)
             for alt in candidates:
                 data_alt = {**params, **base, "symbol": alt}
-                headers_alt, signed_alt = self.signer.build_headers_and_signature(data_alt)
-                resp_alt = await self.http.post("v2/supplement/create_order.do", data=signed_alt, headers=headers_alt)
-                out_alt = resp_alt.json()
+                # Preserve normalized type semantics
+                tt = str(data_alt.get("type", "")).lower()
+                if tt in ("buy_market", "sell_market"):
+                    data_alt["type"] = "buy" if "buy" in tt else "sell"
+                    data_alt["price"] = "0"
+                out_alt = await _post_with(self.http, data_alt, "v2/supplement/create_order.do")
                 try:
                     code_alt = (out_alt or {}).get("error_code")
                 except Exception:
                     code_alt = None
                 if not code_alt:
                     return out_alt
+            # Try alternate endpoint path on same base with symbol/pair variants
+            endpoint_paths = [
+                "v2/create_order.do",
+            ]
+            def build_variants(symbol_value: str) -> list[Dict[str, str]]:
+                v: list[Dict[str, str]] = []
+                common = {k: v for k, v in data.items() if k not in ("symbol", "pair")}
+                v.append({**common, "symbol": symbol_value})
+                v.append({**common, "pair": symbol_value})
+                return v
+            for path in endpoint_paths:
+                for alt in candidates:
+                    for payload in build_variants(alt):
+                        tt = str(payload.get("type", "")).lower()
+                        payload = payload.copy()
+                        if tt in ("buy_market", "sell_market"):
+                            payload["type"] = "buy" if "buy" in tt else "sell"
+                            payload["price"] = "0"
+                        try:
+                            out_variant = await _post_with(self.http, payload, path)
+                        except Exception:
+                            continue
+                        code_v = (out_variant or {}).get("error_code")
+                        if not code_v:
+                            return out_variant
+            # If still failing, try alternate param key (pair) and endpoints and base URLs
+            def build_variants2(symbol_value: str) -> list[Dict[str, str]]:
+                v: list[Dict[str, str]] = []
+                common = {k: v for k, v in data.items() if k not in ("symbol", "pair")}
+                v.append({**common, "symbol": symbol_value})
+                v.append({**common, "pair": symbol_value})
+                return v
+
+            endpoint_paths = [
+                "v2/supplement/create_order.do",
+                "v2/create_order.do",
+            ]
+
+            for base_url in SPOT_BASE_URLS:
+                if self.base_url == base_url.rstrip("/") + "/":
+                    continue
+                http_alt = HttpClient(base_url)
+                try:
+                    await http_alt.open()
+                    # try endpoints and param variants
+                    for path in endpoint_paths:
+                        # try original, then symbol variants
+                        for payload in [data] + [
+                            {**params, **base, "symbol": alt} for alt in candidates
+                        ]:
+                            # normalize market type semantics
+                            tt = str(payload.get("type", "")).lower()
+                            payload = payload.copy()
+                            if tt in ("buy_market", "sell_market"):
+                                payload["type"] = "buy" if "buy" in tt else "sell"
+                                payload["price"] = "0"
+                            # try with symbol and pair key permutations
+                            for p in build_variants2(str(payload.get("symbol") or payload.get("pair") or sym)):
+                                try:
+                                    out_variant = await _post_with(http_alt, p, path)
+                                except Exception:
+                                    continue
+                                code_v = (out_variant or {}).get("error_code")
+                                if not code_v:
+                                    return out_variant
+                finally:
+                    await http_alt.close()
         return out
 
     async def cancel_order(self, params: Dict[str, str]) -> Dict[str, Any]:

@@ -24,7 +24,7 @@ class TimeSynchronizer:
         self._offset_ms = server_ms - local_ms
         drift = abs(self._offset_ms)
         if drift > self.drift_ms_threshold:
-            logger.warn("time.drift", drift_ms=drift)
+            logger.warning("time.drift", drift_ms=drift)
         else:
             logger.info("time.sync", drift_ms=drift)
         return self._offset_ms

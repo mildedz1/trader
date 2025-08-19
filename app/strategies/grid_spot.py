@@ -15,19 +15,20 @@ class GridConfig:
     mode: str = "percent"  # 'percent' | 'arithmetic'
     upper_pct: float = 0.03
     lower_pct: float = 0.03
-    quote_per_order: float = 20.0
+    quote_per_order: float = 10.0
     recenter_on_break: bool = True
     kill_switch_pct: float = 0.06
     recalc_sec: int = 5
     default_stop_loss_pct: float = 0.02
     default_take_profit_pct: float = 0.02
-    order_sizing: str = "fixed_total_pct"  # "static" | "balance_pct" | "fixed_total_pct"
+    order_sizing: str = "static"  # "static" | "balance_pct" | "fixed_total_pct"
     balance_pct_per_order: float = 10.0  # percent of free quote per order if balance_pct
-    total_budget_usdt: float = 2.8  # used when order_sizing = fixed_total_pct
+    total_budget_usdt: float = 50.0  # used when order_sizing = fixed_total_pct
     per_order_pct_of_total: float = 20.0  # percent of total budget per order
     min_notional_usdt: float = 0.0  # min notional for live; in signal mode ignored
-    order_kind: str = "market"  # "limit" | "market"
+    order_kind: str = "limit"  # "limit" | "market"
     cadence_sec: int = 300  # resend signal pack every N seconds even if no recenter
+    cap_buys_by_quote_balance: bool = True  # additionally cap buys by free quote share in live
 
 
 def _build_levels(center: float, cfg: GridConfig) -> Tuple[List[float], List[float], float, float]:
@@ -123,6 +124,10 @@ class GridSpotStrategy:
             if ctx.mode == "live":
                 if side == "sell" and free_base is not None and len(sells) > 0:
                     amt = min(amt, max(0.0, free_base / len(sells)))
+                if self.cfg.cap_buys_by_quote_balance and side == "buy" and free_quote is not None and len(buys) > 0:
+                    # Limit each buy by a fair share of free quote
+                    max_amt_by_quote = max(0.0, (free_quote / len(buys)) / price)
+                    amt = min(amt, max_amt_by_quote)
             return max(0.0, amt)
 
         def add_intent(side: str, price_str: str) -> None:
@@ -133,8 +138,8 @@ class GridSpotStrategy:
             sl = price * (1 - self.cfg.default_stop_loss_pct) if side == "buy" else price * (1 + self.cfg.default_stop_loss_pct)
             tp = price * (1 + self.cfg.default_take_profit_pct) if side == "buy" else price * (1 - self.cfg.default_take_profit_pct)
             kind = self.cfg.order_kind
-            # For market orders, engine will set price=0; omit price in intent
-            intent_price = None if kind == "market" else price_str
+            # For market orders, engine will set price=0; but include level price in signal payload for display
+            intent_price = price_str
             intents.append(
                 OrderIntent(
                     symbol=self.cfg.symbol,
