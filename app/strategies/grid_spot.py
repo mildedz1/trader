@@ -26,7 +26,7 @@ class GridConfig:
     total_budget_usdt: float = 2.8  # used when order_sizing = fixed_total_pct
     per_order_pct_of_total: float = 20.0  # percent of total budget per order
     min_notional_usdt: float = 0.0  # min notional for live; in signal mode ignored
-    order_kind: str = "market"  # "limit" | "market"
+    order_kind: str = "limit"  # "limit" | "market"
     cadence_sec: int = 300  # resend signal pack every N seconds even if no recenter
 
 

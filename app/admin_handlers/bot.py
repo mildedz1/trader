@@ -279,8 +279,12 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             status = "ON" if it['enabled'] else "OFF"
             kb.button(text=f"{it['name']} [{status}]", callback_data=f"strat:toggle:{it['name']}")
             kb.button(text=f"🔎 {it['name']}", callback_data=f"strat:desc:{it['name']}")
+            # Quick config helpers for known strategies
+            if it['name'] == 'grid_spot':
+                kb.button(text="Set Limit", callback_data="strat:setkind:grid_spot:limit")
+                kb.button(text="Set Market", callback_data="strat:setkind:grid_spot:market")
         kb.button(text="⬅️ Back", callback_data="admin:home")
-        kb.adjust(2, 1)
+        kb.adjust(2, 2, 1)
         await cb.message.edit_text("Strategies:", reply_markup=kb.as_markup())
         await cb.answer()
 
@@ -309,6 +313,28 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             txt = txt[:3500] + "..."
         await cb.message.edit_text(txt, reply_markup=admin_kb(state).as_markup())
         await cb.answer()
+
+    @dp.callback_query(F.data.startswith("strat:setkind:"))
+    async def cb_strat_setkind(cb: CallbackQuery) -> None:
+        parts = cb.data.split(":")
+        # strat:setkind:<name>:<kind>
+        if len(parts) < 4:
+            await cb.answer("Bad request", show_alert=True)
+            return
+        name = parts[2]
+        kind = parts[3]
+        plugin = engine.strategies.get(name)
+        if not plugin or not hasattr(plugin, 'cfg'):
+            await cb.answer("Strategy not found", show_alert=True)
+            return
+        try:
+            # type: ignore[attr-defined]
+            plugin.cfg.order_kind = kind  # pyright: ignore
+            await cb.answer(f"Order kind set to {kind}")
+        except Exception:
+            await cb.answer("Failed to set kind", show_alert=True)
+            return
+        await cb_strat_menu(cb)
 
     @dp.callback_query(F.data == "mode:menu")
     async def cb_mode_menu(cb: CallbackQuery) -> None:
