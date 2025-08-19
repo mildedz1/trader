@@ -94,14 +94,20 @@ async def run_bot(stop_event: asyncio.Event) -> None:
     await state.start()
 
     async def notify(event: str, payload: dict) -> None:
-        # send to all admins; format Persian messages and compact grid batches
+        # send to all admins; format Persian messages with compact, tabular batches
         def fmt_qty(q):
             try:
                 return f"{float(q):.8f}".rstrip('0').rstrip('.')
             except Exception:
                 return str(q)
 
-        msgs: list[str] = []
+        def pct(a, b):
+            try:
+                return (float(a) - float(b)) / float(b) * 100.0
+            except Exception:
+                return None
+
+        msgs: list[tuple[str, str]] = []  # (text, parse_mode)
         if event in ("order_intent_batch", "order_live_batch"):
             intents = payload.get("intents", [])
             buys = [it for it in intents if it.get("side") == "buy"]
@@ -110,7 +116,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             mode = payload.get("mode")
             title = ("⚡️ اجرای زنده" if event == "order_live_batch" else "🔔 سیگنال")
 
-            # مرتب‌سازی و انتخاب سطوح با فاصله یکنواخت (بر اساس قیمت)
+            # pick evenly spaced levels
             def pick_levels(items, k=3):
                 try:
                     items = sorted(items, key=lambda x: float(x.get("price") or 0.0))
@@ -119,8 +125,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
                 n = len(items)
                 if n <= k:
                     return items
-                # اندیس‌های تقریباً با فاصله یکنواخت
-                idxs = [round(i*(n-1)/(k-1)) for i in range(k)]
+                idxs = [round(i * (n - 1) / (k - 1)) for i in range(k)]
                 seen = set()
                 picked = []
                 for i in idxs:
@@ -132,62 +137,65 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             buys = pick_levels(buys, 3)
             sells = pick_levels(sells, 3)
 
-            # مرجع برای درصد فاصله: میانگین قیمت‌ها اگر در دسترس باشد
-            import math
-            def to_f(x):
-                try:
-                    return float(x)
-                except Exception:
-                    return math.nan
-            all_prices = [to_f(it.get("price")) for it in (buys + sells) if to_f(it.get("price")) == to_f(it.get("price"))]
-            ref = sum(all_prices)/len(all_prices) if all_prices else None
-
-            lines = [f"{title} · {payload.get('strategy')} · {symbol} · حالت: {mode}"]
-            # If strategy description present, show band/center
+            # center reference if available
             desc = payload.get("desc") or {}
             cur = desc.get("current") or {}
-            if cur.get("center") and cur.get("band"):
-                lines.append(f"🎯 مرکز: {cur['center']} · باند: {cur['band'][0]} — {cur['band'][1]}")
-            if buys:
-                lines.append("🟢 خریدها:")
-                for it in buys:
-                    p = it.get('price')
-                    q = fmt_qty(it.get('quantity'))
-                    delta = ""
-                    if ref:
-                        try:
-                            dp = (float(p) - ref)/ref*100.0
-                            delta = f" (↘️ {abs(dp):.2f}%)" if dp < 0 else f" (↗️ {abs(dp):.2f}%)"
-                        except Exception:
-                            delta = ""
-                    sl = it.get('stop_loss')
-                    tp = it.get('take_profit')
-                    lines.append(f"• خرید: 📦 {q} · 💲 {p}{delta}  · ⛔️ SL {sl} · 🎯 TP {tp}")
-            if sells:
-                lines.append("🔴 فروش‌ها:")
-                for it in sells:
-                    p = it.get('price')
-                    q = fmt_qty(it.get('quantity'))
-                    delta = ""
-                    if ref:
-                        try:
-                            dp = (float(p) - ref)/ref*100.0
-                            delta = f" (↗️ {abs(dp):.2f}%)" if dp > 0 else f" (↘️ {abs(dp):.2f}%)"
-                        except Exception:
-                            delta = ""
-                    sl = it.get('stop_loss')
-                    tp = it.get('take_profit')
-                    lines.append(f"• فروش: 📦 {q} · 💲 {p}{delta}  · ⛔️ SL {sl} · 🎯 TP {tp}")
-            msgs.append("\n".join(lines))
-        else:
-            # fallback single intent
-            text = f"[{event}] {payload.get('strategy')} {payload.get('symbol')} {payload.get('side')} {payload.get('quantity')} @ {payload.get('price')}"
-            msgs.append(text)
+            center = cur.get("center")
+            band = cur.get("band")
 
-        for text in msgs:
+            # build HTML message with <pre> table
+            header = f"<b>{title}</b> · <b>{payload.get('strategy')}</b> · <b>{symbol}</b> · حالت: <b>{mode}</b>"
+            if center and band:
+                header += f"\n🎯 مرکز: {center} · باند: {band[0]} — {band[1]}"
+
+            def render_rows(side_label: str, items: list[dict]) -> list[str]:
+                rows = []
+                for it in items:
+                    p = it.get('price')
+                    q = fmt_qty(it.get('quantity'))
+                    sl = it.get('stop_loss') or "-"
+                    tp = it.get('take_profit') or "-"
+                    d = pct(p, center) if center else None
+                    d_s = (f"{d:+.2f}%" if d is not None else "-")
+                    rows.append([side_label, q, str(p), d_s, str(sl), str(tp)])
+                # compute widths
+                widths = [0] * 6
+                for r in rows:
+                    for i, col in enumerate(r):
+                        widths[i] = max(widths[i], len(col))
+                # header row
+                hdr = ["نوع", "مقدار", "قیمت", "%فاصله", "SL", "TP"]
+                for i, col in enumerate(hdr):
+                    widths[i] = max(widths[i], len(col))
+                def fmt_row(r):
+                    return " ".join(col.rjust(widths[i]) for i, col in enumerate(r))
+                out = [fmt_row(hdr)]
+                out.append(" ".join("-" * w for w in widths))
+                out.extend(fmt_row(r) for r in rows)
+                return out
+
+            table_lines: list[str] = []
+            if buys:
+                table_lines.extend(render_rows("خرید", buys))
+            if sells:
+                if table_lines:
+                    table_lines.append("")
+                table_lines.extend(render_rows("فروش", sells))
+
+            body = "\n".join(table_lines)
+            text = header + f"\n<pre>{body}</pre>"
+            msgs.append((text, "HTML"))
+        else:
+            text = f"[{event}] {payload.get('strategy')} {payload.get('symbol')} {payload.get('side')} {payload.get('quantity')} @ {payload.get('price')}"
+            msgs.append((text, None))
+
+        for text, parse_mode in msgs:
             for uid in admin_ids:
                 try:
-                    await bot.send_message(uid, text)
+                    if parse_mode:
+                        await bot.send_message(uid, text, parse_mode=parse_mode)
+                    else:
+                        await bot.send_message(uid, text)
                 except Exception:
                     pass
 
