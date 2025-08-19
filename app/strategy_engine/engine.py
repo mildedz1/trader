@@ -178,17 +178,18 @@ class StrategyEngine:
             await self._ratelimiter.acquire("trade")
             order_type = None
             if intent.type == "market":
-                order_type = "buy_market" if intent.side == "buy" else "sell_market"
+                # LBank market often uses price=0 and type=buy/sell
+                order_type = "buy" if intent.side == "buy" else "sell"
             else:
-                # maker post-only to avoid taker
-                order_type = "buy_maker" if intent.side == "buy" else "sell_maker"
+                # Use standard buy/sell for limit; maker can be exchange-specific
+                order_type = "buy" if intent.side == "buy" else "sell"
             params: Dict[str, str] = {
                 "symbol": intent.symbol,
                 "type": order_type,
                 "amount": intent.quantity,
             }
-            if intent.price and intent.type != "market":
-                params["price"] = intent.price
+            # For market, price=0; for limit, pass price
+            params["price"] = "0" if intent.type == "market" else (intent.price or "0")
             try:
                 resp = await self.spot_client.create_order(params)
                 ok = False
