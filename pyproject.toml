@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lbank-telegram-trader"
+name = "mexc-telegram-trader"
 version = "0.1.0"
-description = "Telegram trading bot for LBank Spot V2 and Perp V1"
+description = "Telegram trading bot for MEXC Spot (with optional LBank Perp sample)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}

@@ -116,6 +116,8 @@ class StrategyEngine:
                 logger.error("strategy.startup.error", name=name, error=str(exc))
         # Tick loop
         while True:
+            # rebuild context each tick to reflect updated clients/mode
+            ctx = self._build_ctx()
             for name, plugin in list(self.strategies.items()):
                 if not self.enabled.get(name, False):
                     continue
@@ -175,46 +177,35 @@ class StrategyEngine:
 
     async def _place_live(self, intent: OrderIntent, strategy_name: str) -> None:
         logger.info("strategy.order.live", intent=intent.__dict__)
-        # Spot placement
-        if self.spot_client and intent.symbol:
+        # Route by strategy scope (perp vs spot)
+        plugin = self.strategies.get(strategy_name)
+        scope = getattr(plugin, "scope", "both") if plugin is not None else "both"
+
+        # Perp placement
+        if scope == "perp" and self.perp_client and intent.symbol:
             await self._ratelimiter.acquire("trade")
-            order_type = None
-            if intent.type == "market":
-                # LBank market orders: use explicit buy_market / sell_market
-                order_type = "buy_market" if intent.side == "buy" else "sell_market"
-            else:
-                # Spot V2 supplement recommends buy/sell for limit
-                order_type = "buy" if intent.side == "buy" else "sell"
-            # Prefer canonical symbol if available
+            order_type = "MARKET" if intent.type == "market" else "LIMIT"
             used_symbol = intent.symbol
-            try:
-                if hasattr(self.spot_client, "normalize_symbol"):
-                    used_symbol = await self.spot_client.normalize_symbol(intent.symbol)
-            except Exception:
-                used_symbol = intent.symbol
             params: Dict[str, str] = {
                 "symbol": used_symbol,
                 "type": order_type,
-                "amount": intent.quantity,
+                "side": ("BUY" if intent.side == "buy" else "SELL"),
+                "quantity": intent.quantity,
             }
-            # LBank official: omit price for market orders; include for limit
-            if intent.type == "limit":
-                used_price = intent.price or "0"
+            if intent.type == "limit" and intent.price is not None:
+                used_price = intent.price
                 params["price"] = used_price
             else:
                 used_price = "-"
-            # Pass through client order id if provided (LBank supports custom_id)
-            if intent.client_order_id:
-                params["custom_id"] = intent.client_order_id
             try:
-                resp = await self.spot_client.create_order(params)
-                ok = False
-                msg = None
+                resp = await self.perp_client.create_order(params)
+                ok = True
                 code = None
+                msg = None
                 if isinstance(resp, dict):
-                    ok = bool(resp.get("success") in (True, "true", "True") or resp.get("result") in (True, "true", "True"))
+                    code = resp.get("code")
                     msg = resp.get("msg") or resp.get("message")
-                    code = resp.get("error_code") or resp.get("code")
+                    ok = (code is None) or (str(code) in ("0", "SUCCESS"))
                 if ok:
                     if self.notifier is not None:
                         await self.notifier("order_placed", {
@@ -235,7 +226,90 @@ class StrategyEngine:
                             "type": order_type,
                             "quantity": intent.quantity,
                             "price": used_price,
-                            "error": f"{code} {msg}",
+                            "error": f"{code or ''} {msg or ''}",
+                            "resp": resp,
+                        })
+            except Exception as exc:
+                if self.notifier is not None:
+                    await self.notifier("order_error", {
+                        "strategy": strategy_name,
+                        "symbol": used_symbol,
+                        "side": intent.side,
+                        "type": order_type,
+                        "quantity": intent.quantity,
+                        "price": used_price,
+                        "error": str(exc),
+                    })
+            return
+
+        # Spot placement
+        if self.spot_client and intent.symbol:
+            await self._ratelimiter.acquire("trade")
+            order_type = None
+            if intent.type == "market":
+                # MEXC uses MARKET type
+                order_type = "MARKET"
+            else:
+                # MEXC uses LIMIT type
+                order_type = "LIMIT"
+            # Prefer canonical symbol if available
+            used_symbol = intent.symbol
+            try:
+                if hasattr(self.spot_client, "normalize_symbol"):
+                    used_symbol = await self.spot_client.normalize_symbol(intent.symbol)
+            except Exception:
+                used_symbol = intent.symbol
+            params: Dict[str, str] = {
+                "symbol": used_symbol,
+                "type": order_type,
+                "side": ("BUY" if intent.side == "buy" else "SELL"),
+                "quantity": intent.quantity,
+            }
+            # For limit orders include price; for market omit
+            if intent.type == "limit":
+                used_price = intent.price or "0"
+                params["price"] = used_price
+            else:
+                used_price = "-"
+            # Client order id passthrough for REST; omit for demo client to avoid mismatch
+            if intent.client_order_id and not (hasattr(self.spot_client, "is_demo") and getattr(self.spot_client, "is_demo")):
+                safe = (
+                    intent.client_order_id.replace(" ", "_")
+                    .replace("/", "_")
+                    .replace(".", "_")
+                )
+                params["clientOrderId"] = safe[:32]
+            try:
+                resp = await self.spot_client.create_order(params)
+                ok = False
+                msg = None
+                code = None
+                if isinstance(resp, dict):
+                    # Treat missing code as success; if code exists and is non-zero, it's error
+                    code = resp.get("code")
+                    msg = resp.get("msg") or resp.get("message")
+                    ok = (code is None) or (str(code) in ("0", "SUCCESS"))
+                if ok:
+                    if self.notifier is not None:
+                        await self.notifier("order_placed", {
+                            "strategy": strategy_name,
+                            "symbol": used_symbol,
+                            "side": intent.side,
+                            "type": order_type,
+                            "quantity": intent.quantity,
+                            "price": used_price,
+                            "resp": resp,
+                        })
+                else:
+                    if self.notifier is not None:
+                        await self.notifier("order_error", {
+                            "strategy": strategy_name,
+                            "symbol": used_symbol,
+                            "side": intent.side,
+                            "type": order_type,
+                            "quantity": intent.quantity,
+                            "price": used_price,
+                            "error": f"{code or ''} {msg or ''}",
                             "resp": resp,
                         })
             except Exception as exc:

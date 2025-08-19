@@ -4,25 +4,29 @@ import asyncio
 from typing import Sequence
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.utils.token import validate_token, TokenValidationError
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.config.settings import settings
 from app.logging import logger
-from app.lbank_spot.time_source import fetch_spot_server_time_ms
+from app.coinex_spot.time_source import fetch_spot_server_time_ms
 from app.lbank_perp.time_source import fetch_perp_server_time_ms
 from app.time_sync import TimeSynchronizer
-from app.lbank_spot import LBankSpotClient
+from app.coinex_spot import CoinexSpotClient
 from app.lbank_perp import LBankPerpClient
+from app.demo.spot_client import DemoSpotClient
+from app.demo.perp_client import DemoPerpClient
 from app.strategy_engine.engine import StrategyEngine
 
 
 class AppState:
     def __init__(self) -> None:
         self.mode: str = "signal"  # signal/live
+        self.demo: bool = False
         self.spot_time = TimeSynchronizer(fetch_server_ms=fetch_spot_server_time_ms)
-        self.spot_client: LBankSpotClient | None = None
+        self.spot_client: MexcSpotClient | None = None
         self.perp_time = TimeSynchronizer(fetch_server_ms=fetch_perp_server_time_ms)
         self.perp_client: LBankPerpClient | None = None
         self._bg_tasks: list[asyncio.Task] = []
@@ -30,10 +34,10 @@ class AppState:
     async def start(self) -> None:
         await self.spot_time.refresh()
         await self.perp_time.refresh()
-        if settings.lbank_spot_api_key and settings.lbank_spot_secret_key:
-            self.spot_client = LBankSpotClient(
-                api_key=settings.lbank_spot_api_key,
-                secret_key=settings.lbank_spot_secret_key,
+        if settings.coinex_access_id and settings.coinex_secret_key:
+            self.spot_client = CoinexSpotClient(
+                access_id=settings.coinex_access_id,
+                secret_key=settings.coinex_secret_key,
                 time_sync=self.spot_time,
             )
             await self.spot_client.open()
@@ -72,11 +76,8 @@ class AppState:
 
 def admin_kb(state: AppState) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"Mode: {state.mode}", callback_data="mode:menu")
-    kb.button(text="Spot Balance", callback_data="spot:balance")
-    kb.button(text="Perp Balance", callback_data="perp:balance")
-    kb.button(text="Strategies", callback_data="strat:menu")
-    kb.button(text="Time Drift", callback_data="time:drift")
+    kb.button(text=("Demo: ON" if state.demo else "Demo: OFF"), callback_data="demo:toggle")
+    kb.button(text="Demo Report", callback_data="demo:report")
     kb.adjust(1)
     return kb
 
@@ -92,11 +93,29 @@ def mode_kb(current: str) -> InlineKeyboardBuilder:
 
 
 async def run_bot(stop_event: asyncio.Event) -> None:
-    bot = Bot(token=settings.telegram_bot_token)
+    # Normalize and validate Telegram token to avoid whitespace/quote issues
+    raw_token = (settings.telegram_bot_token or "").strip().strip('"').strip("'")
+    try:
+        validate_token(raw_token)
+    except TokenValidationError as exc:
+        raise ValueError("Invalid TELEGRAM_BOT_TOKEN. Please check your .env and remove quotes/spaces.") from exc
+    bot = Bot(token=raw_token)
     dp = Dispatcher()
 
     state = AppState()
     await state.start()
+
+    async def _safe_edit_text(message, text: str, markup) -> None:
+        try:
+            await message.edit_text(text, reply_markup=markup)
+        except Exception as exc:
+            if "message is not modified" in str(exc):
+                try:
+                    await message.edit_reply_markup(reply_markup=markup)
+                except Exception:
+                    pass
+            else:
+                raise
 
     async def notify(event: str, payload: dict) -> None:
         # send to all admins; format Persian messages with compact, tabular batches
@@ -241,7 +260,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
 
     @dp.message(Command("start"))
     async def on_start(message: Message) -> None:
-        await message.answer("LBank trader bot is running. Use /admin")
+        await message.answer("MEXC trader bot is running. Use /admin")
 
     @dp.message(Command("status"))
     async def on_status(message: Message) -> None:
@@ -264,8 +283,62 @@ async def run_bot(stop_event: asyncio.Event) -> None:
 
     @dp.callback_query(F.data == "admin:home")
     async def cb_admin_home(cb: CallbackQuery) -> None:
-        await cb.message.edit_text("Admin Dashboard", reply_markup=admin_kb(state).as_markup())
+        await _safe_edit_text(cb.message, "Admin Dashboard", admin_kb(state).as_markup())
         await cb.answer()
+
+    @dp.callback_query(F.data == "demo:toggle")
+    async def cb_demo_toggle(cb: CallbackQuery) -> None:
+        state.demo = not state.demo
+        # restart spot client according to mode
+        try:
+            if state.spot_client:
+                await state.spot_client.close()  # type: ignore[func-returns-value]
+        except Exception:
+            pass
+        # re-init spot: demo or real
+        if state.demo:
+            state.spot_client = DemoSpotClient(initial_balances={"USDT": 200000.0})
+            await state.spot_client.open()
+        else:
+            if settings.coinex_access_id and settings.coinex_secret_key:
+                state.spot_client = CoinexSpotClient(
+                    access_id=settings.coinex_access_id,
+                    secret_key=settings.coinex_secret_key,
+                    time_sync=state.spot_time,
+                )
+                await state.spot_client.open()
+            else:
+                state.spot_client = None
+        # point engine to the current spot client
+        try:
+            engine.spot_client = state.spot_client
+        except Exception:
+            pass
+        await _safe_edit_text(cb.message, "Admin Dashboard", admin_kb(state).as_markup())
+        await cb.answer("Demo mode: %s" % ("ON" if state.demo else "OFF"))
+
+    @dp.callback_query(F.data == "demo:report")
+    async def cb_demo_report(cb: CallbackQuery) -> None:
+        if not state.demo:
+            await cb.answer("Demo is OFF", show_alert=True)
+            return
+        try:
+            rep_spot = None
+            rep_perp = None
+            if state.spot_client and hasattr(state.spot_client, "demo_report"):
+                rep_spot = await state.spot_client.demo_report()  # type: ignore[attr-defined]
+            if state.perp_client and hasattr(state.perp_client, "demo_report"):
+                rep_perp = await state.perp_client.demo_report()  # type: ignore[attr-defined]
+            rep = {"spot": rep_spot, "perp": rep_perp}
+            import json
+            txt = json.dumps(rep, ensure_ascii=False, indent=2)
+            if len(txt) > 3500:
+                txt = txt[:3500] + "..."
+            await _safe_edit_text(cb.message, txt, admin_kb(state).as_markup())
+        except Exception as exc:
+            await _safe_edit_text(cb.message, f"Demo report error: {exc}", admin_kb(state).as_markup())
+        finally:
+            await cb.answer()
 
     @dp.callback_query(F.data == "strat:menu")
     async def cb_strat_menu(cb: CallbackQuery) -> None:
@@ -278,8 +351,11 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             kb.button(text=f"🔎 {it['name']}", callback_data=f"strat:desc:{it['name']}")
         kb.button(text="⬅️ Back", callback_data="admin:home")
         kb.adjust(2, 1)
-        await cb.message.edit_text("Strategies:", reply_markup=kb.as_markup())
-        await cb.answer()
+        try:
+            await cb.answer()
+        except Exception:
+            pass
+        await _safe_edit_text(cb.message, "Strategies:", kb.as_markup())
 
     @dp.callback_query(F.data.startswith("strat:toggle:"))
     async def cb_strat_toggle(cb: CallbackQuery) -> None:
@@ -304,8 +380,11 @@ async def run_bot(stop_event: asyncio.Event) -> None:
         txt = json.dumps(item, ensure_ascii=False, indent=2)
         if len(txt) > 3500:
             txt = txt[:3500] + "..."
-        await cb.message.edit_text(txt, reply_markup=admin_kb(state).as_markup())
-        await cb.answer()
+        try:
+            await cb.answer()
+        except Exception:
+            pass
+        await _safe_edit_text(cb.message, txt, admin_kb(state).as_markup())
 
     @dp.callback_query(F.data == "mode:menu")
     async def cb_mode_menu(cb: CallbackQuery) -> None:
@@ -415,4 +494,3 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             await state.stop()
 
     await _runner()
-

@@ -10,7 +10,7 @@ from app.strategy_engine.engine import OrderIntent
 
 @dataclass
 class GridConfig:
-    symbol: str = "trx_usdt"  # LBank spot symbol style
+    symbol: str = "TRXUSDT"  # MEXC spot symbol style (uppercase, no separator)
     levels_per_side: int = 6
     mode: str = "percent"  # 'percent' | 'arithmetic'
     upper_pct: float = 0.03
@@ -46,7 +46,7 @@ def _build_levels(center: float, cfg: GridConfig) -> Tuple[List[float], List[flo
 
 
 def _format_decimal(value: float) -> str:
-    # LBank accepts string decimals; keep as plain string
+    # Keep as plain string with up to 8 decimals
     return f"{value:.8f}".rstrip("0").rstrip(".")
 
 
@@ -198,10 +198,13 @@ class GridSpotStrategy:
         if not ctx.spot_client:
             return None
         symbols_to_try = [self.cfg.symbol]
-        if self.cfg.symbol.lower() != self.cfg.symbol:
-            symbols_to_try.append(self.cfg.symbol.lower())
-        if self.cfg.symbol.upper() != self.cfg.symbol:
-            symbols_to_try.append(self.cfg.symbol.upper())
+        # Try common normalizations for MEXC: remove separators, uppercase
+        s0 = self.cfg.symbol.replace("_", "").replace("-", "").replace("/", "")
+        if s0 not in symbols_to_try:
+            symbols_to_try.append(s0)
+        s1 = s0.upper()
+        if s1 not in symbols_to_try:
+            symbols_to_try.append(s1)
         for sym in symbols_to_try:
             try:
                 data = await ctx.spot_client.ticker_price(sym)
