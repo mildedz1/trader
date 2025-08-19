@@ -20,7 +20,8 @@ class LBankSpotClient:
         self.time_sync = time_sync
         self.base_url = (base_url or SPOT_BASE_URLS[0]).rstrip("/") + "/"
         self.http = HttpClient(self.base_url, headers={"X-Api-Key": self.api_key})
-        self._pairs: set[str] = set()
+        # Map lowercase -> canonical symbol as returned by API (case preserved)
+        self._pair_map: dict[str, str] = {}
 
     async def open(self) -> None:
         await self.http.open()
@@ -47,30 +48,46 @@ class LBankSpotClient:
         return resp.json()
 
     async def ticker_price(self, symbol: str) -> Dict[str, Any]:
-        # LBank expects lowercase symbols like btc_usdt on V2 supplement endpoints
-        resp = await self.http.get("v2/supplement/ticker/price.do", params={"symbol": symbol.lower()})
+        # Use canonical symbol if available
+        try:
+            sym = await self.normalize_symbol(symbol)
+        except Exception:
+            sym = symbol
+        resp = await self.http.get("v2/supplement/ticker/price.do", params={"symbol": sym})
         return resp.json()
 
-    async def currency_pairs(self) -> set[str]:
-        if self._pairs:
-            return self._pairs
+    async def ticker_24hr(self, symbol: str | None = None) -> Dict[str, Any]:
+        params: Dict[str, Any] = {}
+        if symbol:
+            try:
+                params["symbol"] = await self.normalize_symbol(symbol)
+            except Exception:
+                params["symbol"] = symbol
+        resp = await self.http.get("v2/supplement/ticker/24hr.do", params=params)
+        return resp.json()
+
+    async def currency_pairs(self) -> dict[str, str]:
+        if self._pair_map:
+            return self._pair_map
         resp = await self.http.get("v2/currencyPairs.do")
         data = resp.json()
-        pairs: set[str] = set()
+        mapping: dict[str, str] = {}
         if isinstance(data, dict) and "data" in data:
             for s in data["data"]:
-                pairs.add(str(s).lower())
+                s_str = str(s)
+                mapping[s_str.lower()] = s_str
         elif isinstance(data, list):
             for s in data:
-                pairs.add(str(s).lower())
-        self._pairs = pairs
-        return self._pairs
+                s_str = str(s)
+                mapping[s_str.lower()] = s_str
+        self._pair_map = mapping
+        return self._pair_map
 
     async def normalize_symbol(self, symbol: str) -> str:
         pairs = await self.currency_pairs()
         sl = symbol.lower().replace("/", "_")
         if sl in pairs:
-            return sl
+            return pairs[sl]
         raise ValueError(f"Unsupported symbol on LBank spot: {symbol}")
 
     # Private
@@ -84,11 +101,43 @@ class LBankSpotClient:
     async def create_order(self, params: Dict[str, str]) -> Dict[str, Any]:
         base = await self._security_params()
         data = {**params, **base}
-        if "symbol" in data:
-            data["symbol"] = await self.normalize_symbol(str(data["symbol"]))
+        # Resolve symbol to canonical case from exchange; if missing, let it pass as-is
+        primary_symbol: Optional[str] = None
+        if "symbol" in data and data["symbol"]:
+            try:
+                primary_symbol = await self.normalize_symbol(str(data["symbol"]))
+                data["symbol"] = primary_symbol
+            except Exception:
+                pass
         headers, signed = self.signer.build_headers_and_signature(data)
         resp = await self.http.post("v2/supplement/create_order.do", data=signed, headers=headers)
-        return resp.json()
+        out = resp.json()
+        # Fallback attempts if currency pair nonsupport: try lowercase and uppercase variants
+        try:
+            code = (out or {}).get("error_code")
+        except Exception:
+            code = None
+        if code == 10008 and data.get("symbol"):
+            sym = str(data["symbol"])
+            candidates = []
+            if primary_symbol and primary_symbol != sym:
+                candidates.append(primary_symbol)
+            if sym.lower() != sym:
+                candidates.append(sym.lower())
+            if sym.upper() != sym:
+                candidates.append(sym.upper())
+            for alt in candidates:
+                data_alt = {**params, **base, "symbol": alt}
+                headers_alt, signed_alt = self.signer.build_headers_and_signature(data_alt)
+                resp_alt = await self.http.post("v2/supplement/create_order.do", data=signed_alt, headers=headers_alt)
+                out_alt = resp_alt.json()
+                try:
+                    code_alt = (out_alt or {}).get("error_code")
+                except Exception:
+                    code_alt = None
+                if not code_alt:
+                    return out_alt
+        return out
 
     async def cancel_order(self, params: Dict[str, str]) -> Dict[str, Any]:
         base = await self._security_params()

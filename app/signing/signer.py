@@ -46,6 +46,9 @@ class SpotSigner:
 
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
+            "timestamp": str(params["timestamp"]),
+            "signature_method": params["signature_method"],
+            "echostr": params["echostr"],
         }
         body = {**{k: v for k, v in params.items() if k != "sign"}, "sign": sign}
         return headers, body
@@ -64,6 +67,9 @@ class PerpSigner:
         sign = hmac_sha256_hex(self.secret_key, md5_u)
         headers = {
             "Content-Type": "application/json",
+            "timestamp": str(params["timestamp"]),
+            "signature_method": params["signature_method"],
+            "echostr": params["echostr"],
         }
         body = {**{k: v for k, v in params.items() if k != "sign"}, "sign": sign}
         return headers, body
