@@ -150,12 +150,20 @@ class LBankSpotClient:
         except Exception as exc:
             # Network/DNS error: try alternates immediately
             out = {"error_code": -1, "msg": str(exc)}
+
         # Fallback attempts if currency pair nonsupport: try lowercase and uppercase variants
         try:
             code = (out or {}).get("error_code")
         except Exception:
             code = None
         if code == 10008 and data.get("symbol"):
+            # Pre-check against known pairs to provide clearer diagnostics
+            try:
+                pairs = await self.currency_pairs()
+                if str(data.get("symbol", "")).lower() not in pairs:
+                    return {"error_code": 10008, "msg": "currency pair nonsupport (precheck)", "symbol": data.get("symbol")}
+            except Exception:
+                pass
             sym = str(data["symbol"])
             candidates = []
             if primary_symbol and primary_symbol != sym:
@@ -196,8 +204,33 @@ class LBankSpotClient:
                     code_alt = None
                 if not code_alt:
                     return out_alt
-            # If still failing, try alternate param key (pair) and endpoints and base URLs
+            # Try alternate endpoint path on same base with symbol/pair variants
+            endpoint_paths = [
+                "v2/create_order.do",
+            ]
             def build_variants(symbol_value: str) -> list[Dict[str, str]]:
+                v: list[Dict[str, str]] = []
+                common = {k: v for k, v in data.items() if k not in ("symbol", "pair")}
+                v.append({**common, "symbol": symbol_value})
+                v.append({**common, "pair": symbol_value})
+                return v
+            for path in endpoint_paths:
+                for alt in candidates:
+                    for payload in build_variants(alt):
+                        tt = str(payload.get("type", "")).lower()
+                        payload = payload.copy()
+                        if tt in ("buy_market", "sell_market"):
+                            payload["type"] = "buy" if "buy" in tt else "sell"
+                            payload["price"] = "0"
+                        try:
+                            out_variant = await _post_with(self.http, payload, path)
+                        except Exception:
+                            continue
+                        code_v = (out_variant or {}).get("error_code")
+                        if not code_v:
+                            return out_variant
+            # If still failing, try alternate param key (pair) and endpoints and base URLs
+            def build_variants2(symbol_value: str) -> list[Dict[str, str]]:
                 v: list[Dict[str, str]] = []
                 common = {k: v for k, v in data.items() if k not in ("symbol", "pair")}
                 v.append({**common, "symbol": symbol_value})
@@ -228,7 +261,7 @@ class LBankSpotClient:
                                 payload["type"] = "buy" if "buy" in tt else "sell"
                                 payload["price"] = "0"
                             # try with symbol and pair key permutations
-                            for p in build_variants(str(payload.get("symbol") or payload.get("pair") or sym)):
+                            for p in build_variants2(str(payload.get("symbol") or payload.get("pair") or sym)):
                                 try:
                                     out_variant = await _post_with(http_alt, p, path)
                                 except Exception:
