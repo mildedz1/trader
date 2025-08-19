@@ -178,18 +178,26 @@ class StrategyEngine:
             await self._ratelimiter.acquire("trade")
             order_type = None
             if intent.type == "market":
-                # LBank market uses price=0 and type=buy/sell
-                order_type = "buy" if intent.side == "buy" else "sell"
+                # LBank market orders: use explicit buy_market / sell_market
+                order_type = "buy_market" if intent.side == "buy" else "sell_market"
             else:
                 # Spot V2 supplement recommends buy/sell for limit
                 order_type = "buy" if intent.side == "buy" else "sell"
+            # Prefer canonical symbol if available
+            used_symbol = intent.symbol
+            try:
+                if hasattr(self.spot_client, "normalize_symbol"):
+                    used_symbol = await self.spot_client.normalize_symbol(intent.symbol)
+            except Exception:
+                used_symbol = intent.symbol
             params: Dict[str, str] = {
-                "symbol": intent.symbol,
+                "symbol": used_symbol,
                 "type": order_type,
                 "amount": intent.quantity,
             }
             # For market, price=0; for limit, require price
-            params["price"] = "0" if intent.type == "market" else (intent.price or "0")
+            used_price = "0" if intent.type == "market" else (intent.price or "0")
+            params["price"] = used_price
             try:
                 resp = await self.spot_client.create_order(params)
                 ok = False
@@ -203,22 +211,22 @@ class StrategyEngine:
                     if self.notifier is not None:
                         await self.notifier("order_placed", {
                             "strategy": strategy_name,
-                            "symbol": intent.symbol,
+                            "symbol": used_symbol,
                             "side": intent.side,
                             "type": order_type,
                             "quantity": intent.quantity,
-                            "price": intent.price,
+                            "price": used_price,
                             "resp": resp,
                         })
                 else:
                     if self.notifier is not None:
                         await self.notifier("order_error", {
                             "strategy": strategy_name,
-                            "symbol": intent.symbol,
+                            "symbol": used_symbol,
                             "side": intent.side,
                             "type": order_type,
                             "quantity": intent.quantity,
-                            "price": intent.price,
+                            "price": used_price,
                             "error": f"{code} {msg}",
                             "resp": resp,
                         })
@@ -226,11 +234,11 @@ class StrategyEngine:
                 if self.notifier is not None:
                     await self.notifier("order_error", {
                         "strategy": strategy_name,
-                        "symbol": intent.symbol,
+                        "symbol": used_symbol,
                         "side": intent.side,
                         "type": order_type,
                         "quantity": intent.quantity,
-                        "price": intent.price,
+                        "price": used_price,
                         "error": str(exc),
                     })
 
