@@ -178,10 +178,10 @@ class StrategyEngine:
             await self._ratelimiter.acquire("trade")
             order_type = None
             if intent.type == "market":
-                # LBank market often uses price=0 and type=buy/sell
+                # LBank market uses price=0 and type=buy/sell
                 order_type = "buy" if intent.side == "buy" else "sell"
             else:
-                # Use standard buy/sell for limit; maker can be exchange-specific
+                # Spot V2 supplement recommends buy/sell for limit
                 order_type = "buy" if intent.side == "buy" else "sell"
             params: Dict[str, str] = {
                 "symbol": intent.symbol,
