@@ -82,6 +82,7 @@ def admin_kb(state: AppState) -> InlineKeyboardBuilder:
     kb.button(text=f"Mode: {state.mode}", callback_data="mode:menu")
     kb.button(text="Spot Balance", callback_data="spot:balance")
     kb.button(text=("Demo: ON" if state.demo else "Demo: OFF"), callback_data="demo:toggle")
+    kb.button(text="Demo Report", callback_data="demo:report")
     kb.button(text="Perp Balance (LBank sample)", callback_data="perp:balance")
     kb.button(text="Strategies", callback_data="strat:menu")
     kb.button(text="Time Drift", callback_data="time:drift")
@@ -306,6 +307,23 @@ async def run_bot(stop_event: asyncio.Event) -> None:
                 state.spot_client = None
         await cb.message.edit_text("Admin Dashboard", reply_markup=admin_kb(state).as_markup())
         await cb.answer("Demo mode: %s" % ("ON" if state.demo else "OFF"))
+
+    @dp.callback_query(F.data == "demo:report")
+    async def cb_demo_report(cb: CallbackQuery) -> None:
+        if not state.demo or not state.spot_client or not hasattr(state.spot_client, "demo_report"):
+            await cb.answer("Demo is OFF", show_alert=True)
+            return
+        try:
+            rep = await state.spot_client.demo_report()  # type: ignore[attr-defined]
+            import json
+            txt = json.dumps(rep, ensure_ascii=False, indent=2)
+            if len(txt) > 3500:
+                txt = txt[:3500] + "..."
+            await cb.message.edit_text(txt, reply_markup=admin_kb(state).as_markup())
+        except Exception as exc:
+            await cb.message.edit_text(f"Demo report error: {exc}", reply_markup=admin_kb(state).as_markup())
+        finally:
+            await cb.answer()
 
     @dp.callback_query(F.data == "strat:menu")
     async def cb_strat_menu(cb: CallbackQuery) -> None:

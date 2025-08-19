@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import itertools
 from typing import Any, Dict, Optional
+import math
 
 from app.http import HttpClient
 
@@ -10,17 +11,26 @@ SPOT_BASE_URL = "https://api.mexc.com/"
 
 
 class MexcSpotDemoClient:
-    def __init__(self, initial_balances: Optional[Dict[str, float]] = None, base_url: str | None = None) -> None:
+    def __init__(self, initial_balances: Optional[Dict[str, float]] = None, base_url: str | None = None, slippage_bps: int = 5, enable_partial_fills: bool = True) -> None:
         self.base_url = (base_url or SPOT_BASE_URL).rstrip("/") + "/"
         self.http = HttpClient(self.base_url)
         # balances tracked as {asset: {free: float, locked: float}}
         self._balances: Dict[str, Dict[str, float]] = {}
         init = initial_balances or {"USDT": 100000.0}
+        self._initial_balances: Dict[str, float] = {k.upper(): float(v) for k, v in init.items()}
         for asset, amt in init.items():
             self._balances[asset.upper()] = {"free": float(amt), "locked": 0.0}
         self._pair_map: dict[str, str] = {}
         self._orders: Dict[str, Dict[str, Any]] = {}
         self._id_counter = itertools.count(1)
+        # demo trading state
+        self.is_demo: bool = True
+        self._realized_pnl_usdt: float = 0.0
+        # running inventory avg cost in USDT for base assets
+        self._inventory: Dict[str, Dict[str, float]] = {}  # {asset: {qty, avg_cost_usdt}}
+        self._trade_log: list[Dict[str, Any]] = []
+        self._slippage_bps = max(0, int(slippage_bps))
+        self._partial_fills = bool(enable_partial_fills)
 
     async def open(self) -> None:
         await self.http.open()
@@ -87,32 +97,67 @@ class MexcSpotDemoClient:
         ensure_asset(base)
         ensure_asset(quote)
 
-        # Market: fill immediately at last price
-        fill_now = False
+        # Market: fill immediately at last price with slippage
+        fill_fraction = 0.0
+        fill_price = price
         if otype == "MARKET":
-            fill_now = True
-        elif otype == "LIMIT":
-            # Fill if price crosses last price
-            if side == "BUY" and price >= last_price:
-                fill_now = True
-            if side == "SELL" and price <= last_price:
-                fill_now = True
-
-        if fill_now:
-            notional = qty * price
+            fill_fraction = 1.0
+            slip = self._slippage_bps / 10000.0
             if side == "BUY":
-                # Check quote balance
+                fill_price = last_price * (1.0 + slip)
+            else:
+                fill_price = last_price * (1.0 - slip)
+        elif otype == "LIMIT":
+            # If price crosses last, allow partial fills
+            if side == "BUY" and last_price >= price:
+                # the more it crosses, the higher the fraction
+                over = (last_price - price) / max(price, 1e-12)
+                fill_fraction = 1.0 if not self._partial_fills else max(0.3, min(1.0, 0.3 + over * 5))
+                fill_price = price
+            elif side == "SELL" and last_price <= price:
+                under = (price - last_price) / max(price, 1e-12)
+                fill_fraction = 1.0 if not self._partial_fills else max(0.3, min(1.0, 0.3 + under * 5))
+                fill_price = price
+        
+        if fill_fraction > 0.0:
+            executed = qty * fill_fraction
+            # Ensure balances
+            notional = executed * fill_price
+            if side == "BUY":
                 if self._balances[quote]["free"] + 1e-12 < notional:
                     return {"code": 700001, "msg": "Insufficient balance in demo"}
                 self._balances[quote]["free"] -= notional
-                self._balances[base]["free"] += qty
-            else:  # SELL
-                if self._balances[base]["free"] + 1e-12 < qty:
+                self._balances[base]["free"] += executed
+                # inventory avg cost update
+                inv = self._inventory.get(base, {"qty": 0.0, "avg": 0.0})
+                new_qty = inv["qty"] + executed
+                new_avg = ((inv["avg"] * inv["qty"]) + notional) / max(new_qty, 1e-12)
+                self._inventory[base] = {"qty": new_qty, "avg": new_avg}
+            else:
+                if self._balances[base]["free"] + 1e-12 < executed:
                     return {"code": 700001, "msg": "Insufficient balance in demo"}
-                self._balances[base]["free"] -= qty
+                self._balances[base]["free"] -= executed
                 self._balances[quote]["free"] += notional
-            status = "FILLED"
-            filled_qty = qty
+                # realized pnl on sell against avg cost
+                inv = self._inventory.get(base, {"qty": 0.0, "avg": 0.0})
+                avg = inv.get("avg", 0.0)
+                self._realized_pnl_usdt += (fill_price - avg) * executed
+                new_qty = max(0.0, inv.get("qty", 0.0) - executed)
+                if new_qty <= 1e-12:
+                    self._inventory.pop(base, None)
+                else:
+                    self._inventory[base] = {"qty": new_qty, "avg": avg}
+            status = "FILLED" if math.isclose(executed, qty, rel_tol=0, abs_tol=1e-12) else "PARTIALLY_FILLED"
+            filled_qty = executed
+            # log trade
+            self._trade_log.append({
+                "symbol": sym,
+                "side": side,
+                "price": fill_price,
+                "qty": executed,
+                "notional": notional,
+                "type": otype,
+            })
 
         order = {
             "symbol": sym,
@@ -146,4 +191,44 @@ class MexcSpotDemoClient:
                 return s[: -len(q)], q
         # fallback
         return s, "USDT"
+
+    async def _asset_price_usdt(self, asset: str) -> float:
+        a = asset.upper()
+        if a == "USDT":
+            return 1.0
+        sym = f"{a}USDT"
+        try:
+            t = await self.ticker_price(sym)
+            p = float(str(t.get("price") or t.get("last") or 0))
+            return p if p > 0 else 0.0
+        except Exception:
+            return 0.0
+
+    async def demo_report(self) -> Dict[str, Any]:
+        # Compute total equity (USDT), realized/unrealized PnL, open orders, positions
+        total_equity = 0.0
+        unrealized = 0.0
+        positions: list[Dict[str, Any]] = []
+        # Sum wallet equity
+        for asset, info in self._balances.items():
+            qty = float(info.get("free", 0.0)) + float(info.get("locked", 0.0))
+            px = await self._asset_price_usdt(asset)
+            total_equity += qty * px
+        # Positions and unrealized
+        for asset, inv in self._inventory.items():
+            qty = inv.get("qty", 0.0)
+            avg = inv.get("avg", 0.0)
+            px = await self._asset_price_usdt(asset)
+            upnl = (px - avg) * qty
+            unrealized += upnl
+            positions.append({"asset": asset, "qty": qty, "avg": avg, "mark": px, "uPnL": upnl})
+        open_orders = list(self._orders.values())
+        return {
+            "equityUSDT": total_equity,
+            "realizedPnLUSDT": self._realized_pnl_usdt,
+            "unrealizedPnLUSDT": unrealized,
+            "positions": positions,
+            "openOrders": open_orders,
+            "trades": self._trade_log[-50:],
+        }
 
