@@ -329,11 +329,17 @@ async def run_bot(stop_event: asyncio.Event) -> None:
 
     @dp.callback_query(F.data == "demo:report")
     async def cb_demo_report(cb: CallbackQuery) -> None:
-        if not state.demo or not state.spot_client or not hasattr(state.spot_client, "demo_report"):
+        if not state.demo:
             await cb.answer("Demo is OFF", show_alert=True)
             return
         try:
-            rep = await state.spot_client.demo_report()  # type: ignore[attr-defined]
+            rep_spot = None
+            rep_perp = None
+            if state.spot_client and hasattr(state.spot_client, "demo_report"):
+                rep_spot = await state.spot_client.demo_report()  # type: ignore[attr-defined]
+            if state.perp_client and hasattr(state.perp_client, "demo_report"):
+                rep_perp = await state.perp_client.demo_report()  # type: ignore[attr-defined]
+            rep = {"spot": rep_spot, "perp": rep_perp}
             import json
             txt = json.dumps(rep, ensure_ascii=False, indent=2)
             if len(txt) > 3500:

@@ -29,8 +29,7 @@ class MexcPerpDemoClient:
 
     async def ticker_price(self, symbol: str | None = None) -> float:
         sym = symbol or self.symbol
-        # use index price endpoint as proxy
-        # if not available, fallback to instrument marketData
+        # Try contract index; if fails, fallback to spot ticker
         try:
             resp = await self.http.get(f"/api/v1/contract/index/{sym.replace('_','')}")
             data = resp.json()
@@ -45,13 +44,15 @@ class MexcPerpDemoClient:
                             return float(d[k])
         except Exception:
             pass
+        # Spot fallback
         try:
-            resp = await self.http.get("/api/v1/contract/marketData")
-            arr = resp.json() or []
-            if isinstance(arr, list):
-                for it in arr:
-                    if it.get("symbol") in {sym, sym.replace("_", "")}:
-                        return float(it.get("lastPrice"))
+            from app.http import HttpClient as _Http
+            spot_sym = sym.replace("_", "")
+            async with _Http("https://api.mexc.com/") as h2:
+                r2 = await h2.get("api/v3/ticker/price", params={"symbol": spot_sym})
+                d2 = r2.json()
+                if isinstance(d2, dict) and d2.get("price"):
+                    return float(d2["price"])  # type: ignore[arg-type]
         except Exception:
             pass
         return 0.0
@@ -119,4 +120,15 @@ class MexcPerpDemoClient:
             o["status"] = "CANCELED"
             return o
         return {"code": 1, "msg": "not found"}
+
+    async def demo_report(self) -> Dict[str, Any]:
+        acct = await self.account()
+        return {
+            "perp": True,
+            "symbol": self.symbol,
+            "equityUSDT": acct.get("equity"),
+            "balanceUSDT": acct.get("balance"),
+            "position": acct.get("position"),
+            "openOrders": list(self._orders.values()),
+        }
 
