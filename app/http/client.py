@@ -34,6 +34,14 @@ class HttpClient:
         assert self._client is not None
         return await self._client.get(path, params=params, headers=headers)
 
-    async def post(self, path: str, data: Dict[str, Any] | None = None, headers: Dict[str, str] | None = None) -> httpx.Response:
+    async def post(
+        self,
+        path: str,
+        data: Dict[str, Any] | None = None,
+        headers: Dict[str, str] | None = None,
+        json: Dict[str, Any] | None = None,
+    ) -> httpx.Response:
         assert self._client is not None
+        if json is not None:
+            return await self._client.post(path, json=json, headers=headers)
         return await self._client.post(path, data=data, headers=headers)

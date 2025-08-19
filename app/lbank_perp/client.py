@@ -27,6 +27,7 @@ class LBankPerpClient:
     async def _security_params(self) -> Dict[str, str]:
         ts = self.time_sync.now_ms()
         return {
+            "api_key": self.api_key,
             "timestamp": str(ts),
             "signature_method": "HmacSHA256",
             "echostr": random_echostr(32),
@@ -49,5 +50,5 @@ class LBankPerpClient:
     async def account_balance(self) -> Dict[str, Any]:
         base = await self._security_params()
         headers, signed = self.signer.build_headers_and_signature(base)
-        resp = await self.http.post("cfd/openApi/v1/pri/account/balance", data=signed, headers=headers)
+        resp = await self.http.post("cfd/openApi/v1/pri/account/balance", json=signed, headers=headers)
         return resp.json()

@@ -11,8 +11,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from app.config.settings import settings
 from app.logging import logger
 from app.lbank_spot.time_source import fetch_spot_server_time_ms
+from app.lbank_perp.time_source import fetch_perp_server_time_ms
 from app.time_sync import TimeSynchronizer
 from app.lbank_spot import LBankSpotClient
+from app.lbank_perp import LBankPerpClient
 
 
 class AppState:
@@ -20,10 +22,13 @@ class AppState:
         self.mode: str = "paper"  # paper/dry-run/live
         self.spot_time = TimeSynchronizer(fetch_server_ms=fetch_spot_server_time_ms)
         self.spot_client: LBankSpotClient | None = None
+        self.perp_time = TimeSynchronizer(fetch_server_ms=fetch_perp_server_time_ms)
+        self.perp_client: LBankPerpClient | None = None
         self._bg_tasks: list[asyncio.Task] = []
 
     async def start(self) -> None:
         await self.spot_time.refresh()
+        await self.perp_time.refresh()
         if settings.lbank_spot_api_key and settings.lbank_spot_secret_key:
             self.spot_client = LBankSpotClient(
                 api_key=settings.lbank_spot_api_key,
@@ -31,11 +36,19 @@ class AppState:
                 time_sync=self.spot_time,
             )
             await self.spot_client.open()
+        if settings.lbank_perp_api_key and settings.lbank_perp_secret_key:
+            self.perp_client = LBankPerpClient(
+                api_key=settings.lbank_perp_api_key,
+                secret_key=settings.lbank_perp_secret_key,
+                time_sync=self.perp_time,
+            )
+            await self.perp_client.open()
 
         async def _time_refresher() -> None:
             while True:
                 try:
                     await self.spot_time.refresh()
+                    await self.perp_time.refresh()
                 except Exception as exc:
                     logger.error("time.refresh.error", error=str(exc))
                 await asyncio.sleep(30)
@@ -47,12 +60,15 @@ class AppState:
             t.cancel()
         if self.spot_client:
             await self.spot_client.close()
+        if self.perp_client:
+            await self.perp_client.close()
 
 
 def admin_kb(state: AppState) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text=f"Mode: {state.mode}", callback_data="mode:menu")
     kb.button(text="Spot Balance", callback_data="spot:balance")
+    kb.button(text="Perp Balance", callback_data="perp:balance")
     kb.button(text="Time Drift", callback_data="time:drift")
     kb.adjust(1)
     return kb
@@ -124,7 +140,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
     async def cb_time_drift(cb: CallbackQuery) -> None:
         drift = abs(state.spot_time._offset_ms)
         await cb.answer()
-        await cb.message.edit_text(f"Time drift: {drift} ms", reply_markup=admin_kb(state).as_markup())
+        await cb.message.edit_text(f"Time drift: spot={abs(state.spot_time._offset_ms)} ms | perp={abs(state.perp_time._offset_ms)} ms", reply_markup=admin_kb(state).as_markup())
 
     @dp.callback_query(F.data == "spot:balance")
     async def cb_spot_balance(cb: CallbackQuery) -> None:
@@ -160,6 +176,47 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             await cb.message.edit_text(text, reply_markup=admin_kb(state).as_markup())
         except Exception as exc:
             await cb.message.edit_text(f"Balance error: {exc}", reply_markup=admin_kb(state).as_markup())
+        finally:
+            await cb.answer()
+
+    @dp.callback_query(F.data == "perp:balance")
+    async def cb_perp_balance(cb: CallbackQuery) -> None:
+        if not state.perp_client:
+            await cb.answer()
+            await cb.message.edit_text("Perp API keys are missing.", reply_markup=admin_kb(state).as_markup())
+            return
+        try:
+            data = await state.perp_client.account_balance()
+            # Perp responses vary; normalize common shapes
+            balances = []
+            if isinstance(data, dict):
+                d = data.get("data") or data
+                # try common fields: balances, assets, account, list
+                for key in ("balances", "assets", "account", "list", "positions"):
+                    if isinstance(d.get(key), list):
+                        balances = d.get(key)
+                        break
+            lines = ["Asset  Balance  Avail/Free  Frozen"]
+            shown = 0
+            for b in balances:
+                asset = b.get("asset") or b.get("currency") or b.get("coin") or b.get("symbol")
+                total = b.get("balance") or b.get("equity") or b.get("walletBalance")
+                avail = b.get("available") or b.get("availableBalance") or b.get("free")
+                frozen = b.get("frozen") or b.get("freeze") or b.get("marginFrozen")
+                def to_f(x):
+                    try:
+                        return float(str(x)) if x is not None else 0.0
+                    except Exception:
+                        return 0.0
+                if any(to_f(v) > 0 for v in (total, avail, frozen)):
+                    lines.append(f"{asset}  {total}  {avail}  {frozen}")
+                    shown += 1
+                    if shown >= 30:
+                        break
+            text = "\n".join(lines) if shown else "No non-zero perp balances."
+            await cb.message.edit_text(text, reply_markup=admin_kb(state).as_markup())
+        except Exception as exc:
+            await cb.message.edit_text(f"Perp balance error: {exc}", reply_markup=admin_kb(state).as_markup())
         finally:
             await cb.answer()
 
