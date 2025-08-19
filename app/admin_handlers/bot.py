@@ -337,13 +337,24 @@ async def run_bot(stop_event: asyncio.Event) -> None:
         if not state.demo:
             await cb.answer("Demo is OFF", show_alert=True)
             return
-        # enable grid strategy automatically and switch engine to live
+        # enable perp BTC grid strategy automatically and switch engine to live
         names = [x["name"] for x in engine.list()]
+        # ensure perp client is demo perp client
+        try:
+            from app.mexc_perp import MexcPerpDemoClient  # type: ignore
+            # replace perp client with demo one
+            demo_perp = MexcPerpDemoClient(initial_balance_usdt=200000.0, symbol="BTC_USDT")
+            await demo_perp.open()
+            state.perp_client = demo_perp  # type: ignore[assignment]
+            engine.perp_client = demo_perp  # type: ignore[assignment]
+        except Exception:
+            pass
+        # load strategy if present and enable it
         for nm in names:
-            if nm.endswith("grid_spot"):
+            if nm.endswith("grid_perp_btc"):
                 engine.set_enabled(nm, True)
         engine.mode = "live"
-        await cb.message.edit_text("Demo grid started (engine=live)", reply_markup=admin_kb(state).as_markup())
+        await cb.message.edit_text("Demo futures BTC grid started (engine=live)", reply_markup=admin_kb(state).as_markup())
         await cb.answer()
 
     @dp.callback_query(F.data == "demo:stop")
