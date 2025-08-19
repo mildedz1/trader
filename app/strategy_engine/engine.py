@@ -175,6 +175,71 @@ class StrategyEngine:
 
     async def _place_live(self, intent: OrderIntent, strategy_name: str) -> None:
         logger.info("strategy.order.live", intent=intent.__dict__)
+        # Route by strategy scope (perp vs spot)
+        plugin = self.strategies.get(strategy_name)
+        scope = getattr(plugin, "scope", "both") if plugin is not None else "both"
+
+        # Perp placement
+        if scope == "perp" and self.perp_client and intent.symbol:
+            await self._ratelimiter.acquire("trade")
+            order_type = "MARKET" if intent.type == "market" else "LIMIT"
+            used_symbol = intent.symbol
+            params: Dict[str, str] = {
+                "symbol": used_symbol,
+                "type": order_type,
+                "side": ("BUY" if intent.side == "buy" else "SELL"),
+                "quantity": intent.quantity,
+            }
+            if intent.type == "limit" and intent.price is not None:
+                used_price = intent.price
+                params["price"] = used_price
+            else:
+                used_price = "-"
+            try:
+                resp = await self.perp_client.create_order(params)
+                ok = True
+                code = None
+                msg = None
+                if isinstance(resp, dict):
+                    code = resp.get("code")
+                    msg = resp.get("msg") or resp.get("message")
+                    ok = (code is None) or (str(code) in ("0", "SUCCESS"))
+                if ok:
+                    if self.notifier is not None:
+                        await self.notifier("order_placed", {
+                            "strategy": strategy_name,
+                            "symbol": used_symbol,
+                            "side": intent.side,
+                            "type": order_type,
+                            "quantity": intent.quantity,
+                            "price": used_price,
+                            "resp": resp,
+                        })
+                else:
+                    if self.notifier is not None:
+                        await self.notifier("order_error", {
+                            "strategy": strategy_name,
+                            "symbol": used_symbol,
+                            "side": intent.side,
+                            "type": order_type,
+                            "quantity": intent.quantity,
+                            "price": used_price,
+                            "error": f"{code or ''} {msg or ''}",
+                            "resp": resp,
+                        })
+            except Exception as exc:
+                if self.notifier is not None:
+                    await self.notifier("order_error", {
+                        "strategy": strategy_name,
+                        "symbol": used_symbol,
+                        "side": intent.side,
+                        "type": order_type,
+                        "quantity": intent.quantity,
+                        "price": used_price,
+                        "error": str(exc),
+                    })
+            return
+
         # Spot placement
         if self.spot_client and intent.symbol:
             await self._ratelimiter.acquire("trade")
