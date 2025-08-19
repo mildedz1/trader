@@ -11,7 +11,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.config.settings import settings
 from app.logging import logger
-from app.mexc_spot.time_source import fetch_spot_server_time_ms
+from app.coinex_spot.time_source import fetch_spot_server_time_ms
 from app.lbank_perp.time_source import fetch_perp_server_time_ms
 from app.time_sync import TimeSynchronizer
 from app.coinex_spot import CoinexSpotClient
