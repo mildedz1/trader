@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     okx_spot_secret_key: str | None = Field(default=None, alias="OKX_SPOT_SECRET_KEY")
     okx_spot_passphrase: str | None = Field(default=None, alias="OKX_SPOT_PASSPHRASE")
     okx_simulated_trading: bool = Field(default=False, alias="OKX_SIMULATED_TRADING")
+    # KuCoin sandbox
+    kucoin_spot_api_key: str | None = Field(default=None, alias="KUCOIN_SPOT_API_KEY")
+    kucoin_spot_secret_key: str | None = Field(default=None, alias="KUCOIN_SPOT_SECRET_KEY")
+    kucoin_spot_passphrase: str | None = Field(default=None, alias="KUCOIN_SPOT_PASSPHRASE")
 
     lbank_perp_api_key: str | None = Field(default=None, alias="LBANK_PERP_API_KEY")
     lbank_perp_secret_key: str | None = Field(default=None, alias="LBANK_PERP_SECRET_KEY")

@@ -15,6 +15,7 @@ from app.okx_spot.time_source import fetch_spot_server_time_ms
 from app.lbank_perp.time_source import fetch_perp_server_time_ms
 from app.time_sync import TimeSynchronizer
 from app.okx_spot import OkxSpotClient
+from app.kucoin_spot import KucoinSpotClient
 from app.lbank_perp import LBankPerpClient
 from app.strategy_engine.engine import StrategyEngine
 
@@ -32,7 +33,7 @@ class AppState:
     async def start(self) -> None:
         await self.spot_time.refresh()
         await self.perp_time.refresh()
-        # OKX spot; use simulated trading when demo is on
+        # Prefer OKX (paper via header) else fallback to KuCoin Sandbox
         if settings.okx_spot_api_key and settings.okx_spot_secret_key and settings.okx_spot_passphrase:
             self.spot_client = OkxSpotClient(
                 api_key=settings.okx_spot_api_key,
@@ -40,6 +41,14 @@ class AppState:
                 passphrase=settings.okx_spot_passphrase,
                 time_sync=self.spot_time,
                 simulated=(self.demo or settings.okx_simulated_trading),
+            )
+            await self.spot_client.open()
+        elif settings.kucoin_spot_api_key and settings.kucoin_spot_secret_key and settings.kucoin_spot_passphrase:
+            self.spot_client = KucoinSpotClient(
+                api_key=settings.kucoin_spot_api_key,
+                secret_key=settings.kucoin_spot_secret_key,
+                passphrase=settings.kucoin_spot_passphrase,
+                time_sync=self.spot_time,
             )
             await self.spot_client.open()
         if settings.lbank_perp_api_key and settings.lbank_perp_secret_key:
@@ -304,7 +313,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
         except Exception:
             pass
         # re-init
-        # Recreate OKX client with simulated flag
+        # Recreate spot client with paper/sandbox
         if settings.okx_spot_api_key and settings.okx_spot_secret_key and settings.okx_spot_passphrase:
             state.spot_client = OkxSpotClient(
                 api_key=settings.okx_spot_api_key,
@@ -312,6 +321,14 @@ async def run_bot(stop_event: asyncio.Event) -> None:
                 passphrase=settings.okx_spot_passphrase,
                 time_sync=state.spot_time,
                 simulated=(state.demo or settings.okx_simulated_trading),
+            )
+            await state.spot_client.open()
+        elif settings.kucoin_spot_api_key and settings.kucoin_spot_secret_key and settings.kucoin_spot_passphrase:
+            state.spot_client = KucoinSpotClient(
+                api_key=settings.kucoin_spot_api_key,
+                secret_key=settings.kucoin_spot_secret_key,
+                passphrase=settings.kucoin_spot_passphrase,
+                time_sync=state.spot_time,
             )
             await state.spot_client.open()
         else:
