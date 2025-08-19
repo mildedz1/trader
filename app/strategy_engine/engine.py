@@ -204,9 +204,8 @@ class StrategyEngine:
                 params["price"] = used_price
             else:
                 used_price = "-"
-            # Client order id passthrough
-            if intent.client_order_id:
-                # Constrain client order id to allowed charset for MEXC
+            # Client order id passthrough for REST; omit for demo client to avoid mismatch
+            if intent.client_order_id and not (hasattr(self.spot_client, "is_demo") and getattr(self.spot_client, "is_demo")):
                 safe = (
                     intent.client_order_id.replace(" ", "_")
                     .replace("/", "_")
@@ -219,10 +218,10 @@ class StrategyEngine:
                 msg = None
                 code = None
                 if isinstance(resp, dict):
-                    # MEXC typically returns order object or error with code/msg
-                    ok = not ("code" in resp and resp.get("code") not in ("0", 0))
-                    msg = resp.get("msg") or resp.get("message")
+                    # Treat missing code as success; if code exists and is non-zero, it's error
                     code = resp.get("code")
+                    msg = resp.get("msg") or resp.get("message")
+                    ok = (code is None) or (str(code) in ("0", "SUCCESS"))
                 if ok:
                     if self.notifier is not None:
                         await self.notifier("order_placed", {
@@ -243,7 +242,7 @@ class StrategyEngine:
                             "type": order_type,
                             "quantity": intent.quantity,
                             "price": used_price,
-                            "error": f"{code} {msg}",
+                            "error": f"{code or ''} {msg or ''}",
                             "resp": resp,
                         })
             except Exception as exc:

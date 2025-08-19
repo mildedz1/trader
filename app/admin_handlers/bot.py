@@ -307,6 +307,11 @@ async def run_bot(stop_event: asyncio.Event) -> None:
                 await state.spot_client.open()
             else:
                 state.spot_client = None
+        # point engine to the current spot client
+        try:
+            engine.spot_client = state.spot_client
+        except Exception:
+            pass
         await cb.message.edit_text("Admin Dashboard", reply_markup=admin_kb(state).as_markup())
         await cb.answer("Demo mode: %s" % ("ON" if state.demo else "OFF"))
 
