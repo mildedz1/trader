@@ -46,7 +46,8 @@ class LBankSpotClient:
         return resp.json()
 
     async def ticker_price(self, symbol: str) -> Dict[str, Any]:
-        resp = await self.http.get("v2/supplement/ticker/price.do", params={"symbol": symbol})
+        # LBank expects lowercase symbols like btc_usdt on V2 supplement endpoints
+        resp = await self.http.get("v2/supplement/ticker/price.do", params={"symbol": symbol.lower()})
         return resp.json()
 
     # Private

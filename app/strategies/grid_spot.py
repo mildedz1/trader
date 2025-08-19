@@ -120,16 +120,57 @@ class GridSpotStrategy:
     async def _fetch_last_price(self, ctx) -> float | None:
         if not ctx.spot_client:
             return None
-        try:
-            data = await ctx.spot_client.ticker_price(self.cfg.symbol)
-            # Accept variations
-            if isinstance(data, dict):
-                d = data.get("data") or data
-                for key in ("price", "last", "lastPrice"):
-                    if key in d:
-                        return float(d[key])
-        except Exception:
-            return None
+        symbols_to_try = [self.cfg.symbol]
+        if self.cfg.symbol.lower() != self.cfg.symbol:
+            symbols_to_try.append(self.cfg.symbol.lower())
+        if self.cfg.symbol.upper() != self.cfg.symbol:
+            symbols_to_try.append(self.cfg.symbol.upper())
+        for sym in symbols_to_try:
+            try:
+                data = await ctx.spot_client.ticker_price(sym)
+                if isinstance(data, dict):
+                    base = data.get("data") or data
+                    # Direct scalar price
+                    for key in ("price", "last", "lastPrice", "latest", "close"):
+                        if key in base and isinstance(base[key], (str, int, float)):
+                            return float(base[key])
+                    # List under data
+                    if isinstance(base, list) and base:
+                        # Find matching symbol if present
+                        def extract_price(obj: dict) -> float | None:
+                            for k in ("price", "last", "lastPrice", "latest", "close"):
+                                if k in obj:
+                                    try:
+                                        return float(obj[k])
+                                    except Exception:
+                                        return None
+                            return None
+                        cand = None
+                        for obj in base:
+                            if isinstance(obj, dict) and obj.get("symbol") in {sym, sym.lower(), sym.upper()}:
+                                cand = extract_price(obj)
+                                if cand is not None:
+                                    return cand
+                        # fallback first item
+                        if isinstance(base[0], dict):
+                            cand = extract_price(base[0])
+                            if cand is not None:
+                                return cand
+                    # Nested ticker list
+                    if isinstance(base, dict) and isinstance(base.get("ticker"), list) and base["ticker"]:
+                        for obj in base["ticker"]:
+                            if not isinstance(obj, dict):
+                                continue
+                            if obj.get("symbol") in {sym, sym.lower(), sym.upper()}:
+                                for k in ("price", "last", "latest", "close"):
+                                    if k in obj:
+                                        return float(obj[k])
+                        obj = base["ticker"][0]
+                        for k in ("price", "last", "latest", "close"):
+                            if k in obj:
+                                return float(obj[k])
+            except Exception:
+                continue
         return None
 
     async def describe(self, ctx) -> Dict[str, Any]:
