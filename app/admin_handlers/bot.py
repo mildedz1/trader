@@ -94,13 +94,45 @@ async def run_bot(stop_event: asyncio.Event) -> None:
     await state.start()
 
     async def notify(event: str, payload: dict) -> None:
-        # send to all admins
-        text = f"[{event}] {payload.get('strategy')} {payload.get('symbol')} {payload.get('side')} {payload.get('quantity')} @ {payload.get('price')}"
-        for uid in admin_ids:
+        # send to all admins; format Persian messages and compact grid batches
+        def fmt_qty(q):
             try:
-                await bot.send_message(uid, text)
+                return f"{float(q):.8f}".rstrip('0').rstrip('.')
             except Exception:
-                pass
+                return str(q)
+
+        msgs: list[str] = []
+        if event in ("order_intent_batch", "order_live_batch"):
+            intents = payload.get("intents", [])
+            buys = [it for it in intents if it.get("side") == "buy"]
+            sells = [it for it in intents if it.get("side") == "sell"]
+            symbol = intents[0].get("symbol") if intents else "-"
+            mode = payload.get("mode")
+            title = "اجرای زنده" if event == "order_live_batch" else "سیگنال"
+            # فقط 6 سطح (3 خرید + 3 فروش) را نمایش بده
+            buys = buys[:3]
+            sells = sells[:3]
+            lines = [f"{title} استراتژی {payload.get('strategy')} ({mode}) — {symbol}"]
+            if buys:
+                lines.append("خریدها:")
+                for it in buys:
+                    lines.append(f"- خرید {fmt_qty(it['quantity'])} @ {it['price']}")
+            if sells:
+                lines.append("فروش‌ها:")
+                for it in sells:
+                    lines.append(f"- فروش {fmt_qty(it['quantity'])} @ {it['price']}")
+            msgs.append("\n".join(lines))
+        else:
+            # fallback single intent
+            text = f"[{event}] {payload.get('strategy')} {payload.get('symbol')} {payload.get('side')} {payload.get('quantity')} @ {payload.get('price')}"
+            msgs.append(text)
+
+        for text in msgs:
+            for uid in admin_ids:
+                try:
+                    await bot.send_message(uid, text)
+                except Exception:
+                    pass
 
     engine = StrategyEngine(spot_client=state.spot_client, perp_client=state.perp_client, notifier=notify)
     engine.load_plugins()

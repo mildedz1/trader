@@ -114,15 +114,20 @@ class StrategyEngine:
                 try:
                     await plugin.on_tick(ctx, self._market_snapshot)
                     intents = await plugin.on_signal(ctx)
+                    permitted: List[OrderIntent] = []
                     for intent in intents:
                         ok = await plugin.risk_check(ctx, intent)
-                        if not ok:
-                            continue
-                        # In signal mode, only notify; in live, place real orders via integration point
-                        if self.mode == "signal":
-                            await self._submit_order(intent, name)
-                        else:  # live
+                        if ok:
+                            permitted.append(intent)
+                    if not permitted:
+                        continue
+                    if self.mode == "signal":
+                        await self._notify_batch(name, permitted, live=False)
+                    else:  # live
+                        # Place live orders; also send batch notification
+                        for intent in permitted:
                             await self._place_live(intent, name)
+                        await self._notify_batch(name, permitted, live=True)
                 except Exception as exc:
                     logger.error("strategy.tick.error", name=name, error=str(exc))
             await asyncio.sleep(1.0)
@@ -165,6 +170,31 @@ class StrategyEngine:
                 await self.notifier("order_live", payload)
             except Exception:
                 pass
+
+    async def _notify_batch(self, strategy_name: str, intents: List[OrderIntent], live: bool) -> None:
+        if self.notifier is None:
+            return
+        event = "order_live_batch" if live else "order_intent_batch"
+        payload = {
+            "event": event,
+            "strategy": strategy_name,
+            "mode": self.mode,
+            "intents": [
+                {
+                    "symbol": it.symbol,
+                    "side": it.side,
+                    "type": it.type,
+                    "quantity": it.quantity,
+                    "price": it.price,
+                    "clientOrderId": it.client_order_id,
+                }
+                for it in intents
+            ],
+        }
+        try:
+            await self.notifier(event, payload)
+        except Exception:
+            pass
 
     async def start(self) -> None:
         if self._bg_task is None or self._bg_task.done():
