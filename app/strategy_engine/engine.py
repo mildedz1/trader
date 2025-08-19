@@ -206,7 +206,13 @@ class StrategyEngine:
                 used_price = "-"
             # Client order id passthrough
             if intent.client_order_id:
-                params["clientOrderId"] = intent.client_order_id
+                # Constrain client order id to allowed charset for MEXC
+                safe = (
+                    intent.client_order_id.replace(" ", "_")
+                    .replace("/", "_")
+                    .replace(".", "_")
+                )
+                params["clientOrderId"] = safe[:32]
             try:
                 resp = await self.spot_client.create_order(params)
                 ok = False

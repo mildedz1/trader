@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import urllib.parse
 from typing import Any, Dict, Optional
+import re
+import secrets
+import string
 
 from app.http import HttpClient
 from app.signing.mexc import MexcSpotSigner
@@ -27,6 +30,17 @@ class MexcSpotClient:
 
     async def close(self) -> None:
         await self.http.close()
+
+    @staticmethod
+    def _sanitize_client_order_id(value: str) -> str:
+        # Replace any invalid character with underscore and trim to 32
+        cleaned = re.sub(r"[^0-9a-zA-Z_-]", "_", str(value))
+        if not cleaned:
+            alphabet = string.ascii_letters + string.digits
+            cleaned = "o_" + "".join(secrets.choice(alphabet) for _ in range(10))
+        if len(cleaned) > 32:
+            cleaned = cleaned[:32]
+        return cleaned
 
     # Public
     async def system_ping(self) -> Dict[str, Any]:
@@ -133,7 +147,7 @@ class MexcSpotClient:
         # clientOrderId if provided
         coid = params.get("custom_id") or params.get("clientOrderId")
         if coid:
-            data["newClientOrderId"] = str(coid)
+            data["newClientOrderId"] = self._sanitize_client_order_id(str(coid))
 
         # Build signed query string (MEXC expects signed params in URL query)
         # Add a standard recvWindow to reduce timestamp strictness
