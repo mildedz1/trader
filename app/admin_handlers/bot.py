@@ -229,6 +229,8 @@ async def run_bot(stop_event: asyncio.Event) -> None:
                     pass
 
     engine = StrategyEngine(spot_client=state.spot_client, perp_client=state.perp_client, notifier=notify)
+    # Align engine mode with current UI state at startup
+    engine.mode = state.mode
     engine.load_plugins()
     await engine.start()
 

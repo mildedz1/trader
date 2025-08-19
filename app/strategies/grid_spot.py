@@ -26,7 +26,8 @@ class GridConfig:
     total_budget_usdt: float = 2.8  # used when order_sizing = fixed_total_pct
     per_order_pct_of_total: float = 20.0  # percent of total budget per order
     min_notional_usdt: float = 0.0  # min notional for live; in signal mode ignored
-    order_kind: str = "market"  # "limit" | "market"
+    # Default to limit so exchange uses the strategy price; market will ignore price
+    order_kind: str = "limit"  # "limit" | "market"
     cadence_sec: int = 300  # resend signal pack every N seconds even if no recenter
 
 
@@ -181,7 +182,13 @@ class GridSpotStrategy:
         if ctx.mode == "signal":
             return True
         try:
-            notional = float(order.quantity) * (float(order.price) if order.price else 0.0)
+            # For market orders, estimate notional using latest price
+            if not order.price:
+                last = await self._fetch_last_price(ctx)
+                price_est = float(last) if last is not None else 0.0
+            else:
+                price_est = float(order.price)
+            notional = float(order.quantity) * price_est
         except Exception:
             return False
         min_notional = max(0.0, self.cfg.min_notional_usdt)

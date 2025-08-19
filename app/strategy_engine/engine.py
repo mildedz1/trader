@@ -129,7 +129,9 @@ class StrategyEngine:
                             permitted.append(intent)
                     if not permitted:
                         continue
-                    if self.mode == "signal":
+                    # Only place live orders when mode is explicitly "live".
+                    # In any other mode (e.g., signal, paper), just emit signals.
+                    if self.mode != "live":
                         # Split by side to avoid mixed confusing packs
                         buys = [i for i in permitted if i.side == "buy"]
                         sells = [i for i in permitted if i.side == "sell"]
@@ -195,9 +197,15 @@ class StrategyEngine:
                 "type": order_type,
                 "amount": intent.quantity,
             }
-            # For market, price=0; for limit, require price
-            used_price = "0" if intent.type == "market" else (intent.price or "0")
-            params["price"] = used_price
+            # LBank official: omit price for market orders; include for limit
+            if intent.type == "limit":
+                used_price = intent.price or "0"
+                params["price"] = used_price
+            else:
+                used_price = "-"
+            # Pass through client order id if provided (LBank supports custom_id)
+            if intent.client_order_id:
+                params["custom_id"] = intent.client_order_id
             try:
                 resp = await self.spot_client.create_order(params)
                 ok = False
