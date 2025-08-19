@@ -19,7 +19,8 @@ class LBankSpotClient:
         self.signer = SpotSigner(secret_key=secret_key)
         self.time_sync = time_sync
         self.base_url = (base_url or SPOT_BASE_URLS[0]).rstrip("/") + "/"
-        self.http = HttpClient(self.base_url, headers={"X-Api-Key": self.api_key})
+        # Do not send non-standard headers by default; LBank expects security headers only
+        self.http = HttpClient(self.base_url)
         # Map lowercase -> canonical symbol as returned by API (case preserved)
         self._pair_map: dict[str, str] = {}
 

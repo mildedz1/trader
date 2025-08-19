@@ -184,6 +184,17 @@ async def run_bot(stop_event: asyncio.Event) -> None:
                     f"✅ سفارش ثبت شد · {payload.get('strategy')} · {payload.get('symbol')}\n"
                     f"{payload.get('type')} {payload.get('side')} | مقدار {payload.get('quantity')} @ {payload.get('price')}"
                 )
+                # attach compact resp if present
+                resp = payload.get("resp")
+                if resp:
+                    import json as _json
+                    try:
+                        body = _json.dumps(resp, ensure_ascii=False)
+                        if len(body) > 800:
+                            body = body[:800] + "..."
+                        text += "\nresp: " + body
+                    except Exception:
+                        pass
                 msgs.append((text, None))
             elif event == "order_error":
                 text = (
@@ -191,6 +202,17 @@ async def run_bot(stop_event: asyncio.Event) -> None:
                     f"{payload.get('type')} {payload.get('side')} | مقدار {payload.get('quantity')} @ {payload.get('price')}\n"
                     f"Error: {payload.get('error')}"
                 )
+                # attach full resp json if available (truncated)
+                resp = payload.get("resp")
+                if resp:
+                    import json as _json
+                    try:
+                        body = _json.dumps(resp, ensure_ascii=False)
+                        if len(body) > 1200:
+                            body = body[:1200] + "..."
+                        text += "\nresp: " + body
+                    except Exception:
+                        pass
                 msgs.append((text, None))
             else:
                 text = f"[{event}] {payload.get('strategy')} {payload.get('symbol')} {payload.get('side')} {payload.get('quantity')} @ {payload.get('price')}"
