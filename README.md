@@ -1,6 +1,6 @@
 ## MEXC Telegram Trader Bot (Python 3.11)
 
-Production-ready, modular Telegram trading bot for MEXC Spot API. Implements MEXC HMAC-SHA256 query-string signing, time sync, and strict rate limits. Perp/Contract (LBank sample) remains optional.
+Production-ready, modular Telegram trading bot for OKX Spot API (with paper-trading via `x-simulated-trading`) and optional demo futures engine.
 
 Stack: aiogram v3, httpx (async), SQLAlchemy + SQLite, APScheduler, structlog, pydantic Settings, Fernet encryption at rest.
 
@@ -16,8 +16,10 @@ docker compose up --build
 
 Environment variables (.env):
 
-- MEXC_SPOT_API_KEY
-- MEXC_SPOT_SECRET_KEY
+- OKX_SPOT_API_KEY
+- OKX_SPOT_SECRET_KEY
+- OKX_SPOT_PASSPHRASE
+- OKX_SIMULATED_TRADING=true
 - FERNET_KEY
 - TELEGRAM_BOT_TOKEN
 - ADMIN_TELEGRAM_USER_IDS

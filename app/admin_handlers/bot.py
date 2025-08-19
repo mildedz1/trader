@@ -11,11 +11,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.config.settings import settings
 from app.logging import logger
-from app.mexc_spot.time_source import fetch_spot_server_time_ms
+from app.okx_spot.time_source import fetch_spot_server_time_ms
 from app.lbank_perp.time_source import fetch_perp_server_time_ms
 from app.time_sync import TimeSynchronizer
-from app.mexc_spot import MexcSpotClient
-from app.mexc_spot.demo_client import MexcSpotDemoClient
+from app.okx_spot import OkxSpotClient
 from app.lbank_perp import LBankPerpClient
 from app.strategy_engine.engine import StrategyEngine
 
@@ -33,17 +32,16 @@ class AppState:
     async def start(self) -> None:
         await self.spot_time.refresh()
         await self.perp_time.refresh()
-        if self.demo:
-            self.spot_client = MexcSpotDemoClient(initial_balances={"USDT": 250000.0})
+        # OKX spot; use simulated trading when demo is on
+        if settings.okx_spot_api_key and settings.okx_spot_secret_key and settings.okx_spot_passphrase:
+            self.spot_client = OkxSpotClient(
+                api_key=settings.okx_spot_api_key,
+                secret_key=settings.okx_spot_secret_key,
+                passphrase=settings.okx_spot_passphrase,
+                time_sync=self.spot_time,
+                simulated=(self.demo or settings.okx_simulated_trading),
+            )
             await self.spot_client.open()
-        else:
-            if settings.mexc_spot_api_key and settings.mexc_spot_secret_key:
-                self.spot_client = MexcSpotClient(
-                    api_key=settings.mexc_spot_api_key,
-                    secret_key=settings.mexc_spot_secret_key,
-                    time_sync=self.spot_time,
-                )
-                await self.spot_client.open()
         if settings.lbank_perp_api_key and settings.lbank_perp_secret_key:
             self.perp_client = LBankPerpClient(
                 api_key=settings.lbank_perp_api_key,
@@ -306,19 +304,18 @@ async def run_bot(stop_event: asyncio.Event) -> None:
         except Exception:
             pass
         # re-init
-        if state.demo:
-            state.spot_client = MexcSpotDemoClient(initial_balances={"USDT": 500000.0})
+        # Recreate OKX client with simulated flag
+        if settings.okx_spot_api_key and settings.okx_spot_secret_key and settings.okx_spot_passphrase:
+            state.spot_client = OkxSpotClient(
+                api_key=settings.okx_spot_api_key,
+                secret_key=settings.okx_spot_secret_key,
+                passphrase=settings.okx_spot_passphrase,
+                time_sync=state.spot_time,
+                simulated=(state.demo or settings.okx_simulated_trading),
+            )
             await state.spot_client.open()
         else:
-            if settings.mexc_spot_api_key and settings.mexc_spot_secret_key:
-                state.spot_client = MexcSpotClient(
-                    api_key=settings.mexc_spot_api_key,
-                    secret_key=settings.mexc_spot_secret_key,
-                    time_sync=state.spot_time,
-                )
-                await state.spot_client.open()
-            else:
-                state.spot_client = None
+            state.spot_client = None
         # point engine to the current spot client
         try:
             engine.spot_client = state.spot_client
