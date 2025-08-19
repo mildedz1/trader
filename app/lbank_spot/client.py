@@ -180,7 +180,11 @@ class LBankSpotClient:
                 try:
                     await http_alt.open()
                     # try original data, then candidates again
-                    out_altbase = await _post_with(http_alt, data)
+                    try:
+                        out_altbase = await _post_with(http_alt, data)
+                    except Exception:
+                        # DNS/network error on this host; try next host
+                        continue
                     code_altbase = (out_altbase or {}).get("error_code")
                     if not code_altbase:
                         return out_altbase
@@ -190,7 +194,11 @@ class LBankSpotClient:
                         if tt in ("buy_market", "sell_market"):
                             data_alt2["type"] = "buy" if "buy" in tt else "sell"
                             data_alt2["price"] = "0"
-                        out_alt2 = await _post_with(http_alt, data_alt2)
+                        try:
+                            out_alt2 = await _post_with(http_alt, data_alt2)
+                        except Exception:
+                            # DNS/network error on this host; try next candidate/host
+                            continue
                         code_alt2 = (out_alt2 or {}).get("error_code")
                         if not code_alt2:
                             return out_alt2
