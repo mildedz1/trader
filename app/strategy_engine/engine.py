@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Protocol, Callable, Awaitable, Optional
 import contextlib
 
 from app.logging import logger
+from app.ratelimiter import RateLimiter
 
 
 @dataclass
@@ -50,6 +51,7 @@ class StrategyEngine:
         self.spot_client = spot_client
         self.perp_client = perp_client
         self.notifier = notifier
+        self._ratelimiter = RateLimiter()
 
     def register(self, name: str, plugin: StrategyPlugin) -> None:
         self.strategies[name] = plugin
@@ -170,24 +172,46 @@ class StrategyEngine:
                 pass
 
     async def _place_live(self, intent: OrderIntent, strategy_name: str) -> None:
-        # TODO: integrate with LBank order queue respecting rate limits
-        # For now, reuse notifier to mark as live placeholder
         logger.info("strategy.order.live", intent=intent.__dict__)
-        if self.notifier is not None:
-            payload = {
-                "event": "order_live",
-                "strategy": strategy_name,
+        # Spot placement
+        if self.spot_client and intent.symbol:
+            await self._ratelimiter.acquire("trade")
+            order_type = None
+            if intent.type == "market":
+                order_type = "buy_market" if intent.side == "buy" else "sell_market"
+            else:
+                # maker post-only to avoid taker
+                order_type = "buy_maker" if intent.side == "buy" else "sell_maker"
+            params: Dict[str, str] = {
                 "symbol": intent.symbol,
-                "side": intent.side,
-                "type": intent.type,
-                "quantity": intent.quantity,
-                "price": intent.price,
-                "clientOrderId": intent.client_order_id,
+                "type": order_type,
+                "amount": intent.quantity,
             }
+            if intent.price and intent.type != "market":
+                params["price"] = intent.price
             try:
-                await self.notifier("order_live", payload)
-            except Exception:
-                pass
+                resp = await self.spot_client.create_order(params)
+                if self.notifier is not None:
+                    await self.notifier("order_placed", {
+                        "strategy": strategy_name,
+                        "symbol": intent.symbol,
+                        "side": intent.side,
+                        "type": order_type,
+                        "quantity": intent.quantity,
+                        "price": intent.price,
+                        "resp": resp,
+                    })
+            except Exception as exc:
+                if self.notifier is not None:
+                    await self.notifier("order_error", {
+                        "strategy": strategy_name,
+                        "symbol": intent.symbol,
+                        "side": intent.side,
+                        "type": order_type,
+                        "quantity": intent.quantity,
+                        "price": intent.price,
+                        "error": str(exc),
+                    })
 
     async def _notify_batch(self, strategy_name: str, intents: List[OrderIntent], live: bool) -> None:
         if self.notifier is None:

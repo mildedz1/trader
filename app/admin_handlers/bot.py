@@ -173,8 +173,23 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             text = "\n".join(lines)
             msgs.append((text, None))
         else:
-            text = f"[{event}] {payload.get('strategy')} {payload.get('symbol')} {payload.get('side')} {payload.get('quantity')} @ {payload.get('price')}"
-            msgs.append((text, None))
+            # single events for live placement
+            if event == "order_placed":
+                text = (
+                    f"✅ سفارش ثبت شد · {payload.get('strategy')} · {payload.get('symbol')}\n"
+                    f"{payload.get('type')} {payload.get('side')} | مقدار {payload.get('quantity')} @ {payload.get('price')}"
+                )
+                msgs.append((text, None))
+            elif event == "order_error":
+                text = (
+                    f"⛔️ خطا در ثبت سفارش · {payload.get('strategy')} · {payload.get('symbol')}\n"
+                    f"{payload.get('type')} {payload.get('side')} | مقدار {payload.get('quantity')} @ {payload.get('price')}\n"
+                    f"Error: {payload.get('error')}"
+                )
+                msgs.append((text, None))
+            else:
+                text = f"[{event}] {payload.get('strategy')} {payload.get('symbol')} {payload.get('side')} {payload.get('quantity')} @ {payload.get('price')}"
+                msgs.append((text, None))
 
         for text, parse_mode in msgs:
             for uid in admin_ids:
