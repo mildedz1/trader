@@ -92,7 +92,17 @@ async def run_bot(stop_event: asyncio.Event) -> None:
 
     state = AppState()
     await state.start()
-    engine = StrategyEngine(spot_client=state.spot_client, perp_client=state.perp_client)
+
+    async def notify(event: str, payload: dict) -> None:
+        # send to all admins
+        text = f"[{event}] {payload.get('strategy')} {payload.get('symbol')} {payload.get('side')} {payload.get('quantity')} @ {payload.get('price')}"
+        for uid in admin_ids:
+            try:
+                await bot.send_message(uid, text)
+            except Exception:
+                pass
+
+    engine = StrategyEngine(spot_client=state.spot_client, perp_client=state.perp_client, notifier=notify)
     engine.load_plugins()
     await engine.start()
 
@@ -132,50 +142,42 @@ async def run_bot(stop_event: asyncio.Event) -> None:
     @dp.callback_query(F.data == "strat:menu")
     async def cb_strat_menu(cb: CallbackQuery) -> None:
         items = engine.list()
-        lines = ["Strategies:"]
+        # Build inline toggles
+        kb = InlineKeyboardBuilder()
         for it in items:
-            lines.append(f"- {it['name']} [{it['scope']}] => {'ON' if it['enabled'] else 'OFF'}")
-        lines.append("\nToggle: /strat_toggle <name> | Describe: /strat_desc <name>")
-        await cb.message.edit_text("\n".join(lines), reply_markup=admin_kb(state).as_markup())
+            status = "ON" if it['enabled'] else "OFF"
+            kb.button(text=f"{it['name']} [{status}]", callback_data=f"strat:toggle:{it['name']}")
+            kb.button(text=f"🔎 {it['name']}", callback_data=f"strat:desc:{it['name']}")
+        kb.button(text="⬅️ Back", callback_data="admin:home")
+        kb.adjust(2, 1)
+        await cb.message.edit_text("Strategies:", reply_markup=kb.as_markup())
         await cb.answer()
 
-    @dp.message(F.text.startswith("/strat_toggle"))
-    async def on_strat_toggle(message: Message) -> None:
-        if not is_admin(message.from_user.id if message.from_user else None):
-            await message.answer("Unauthorized")
-            return
-        parts = message.text.strip().split()
-        if len(parts) < 2:
-            await message.answer("Usage: /strat_toggle <name>")
-            return
-        name = parts[1]
-        cur = next((x for x in engine.list() if x["name"].endswith(name) or x["name"] == name), None)
+    @dp.callback_query(F.data.startswith("strat:toggle:"))
+    async def cb_strat_toggle(cb: CallbackQuery) -> None:
+        name = cb.data.split(":", 2)[2]
+        cur = next((x for x in engine.list() if x["name"] == name), None)
         if not cur:
-            await message.answer("Strategy not found")
+            await cb.answer("Not found", show_alert=True)
             return
-        engine.set_enabled(cur["name"], not cur["enabled"])
-        await message.answer(f"{cur['name']} => {'ON' if not cur['enabled'] else 'OFF'}")
+        engine.set_enabled(name, not cur["enabled"])
+        await cb.answer("Toggled")
+        await cb_strat_menu(cb)
 
-    @dp.message(F.text.startswith("/strat_desc"))
-    async def on_strat_desc(message: Message) -> None:
-        if not is_admin(message.from_user.id if message.from_user else None):
-            await message.answer("Unauthorized")
-            return
-        parts = message.text.strip().split()
-        if len(parts) < 2:
-            await message.answer("Usage: /strat_desc <name>")
-            return
-        name = parts[1]
+    @dp.callback_query(F.data.startswith("strat:desc:"))
+    async def cb_strat_desc(cb: CallbackQuery) -> None:
+        name = cb.data.split(":", 2)[2]
         all_desc = await engine.describe_all()
-        item = next((x for x in all_desc if x["name"].endswith(name) or x["name"] == name), None)
+        item = next((x for x in all_desc if x["name"] == name), None)
         if not item:
-            await message.answer("Strategy not found")
+            await cb.answer("Not found", show_alert=True)
             return
         import json
         txt = json.dumps(item, ensure_ascii=False, indent=2)
         if len(txt) > 3500:
             txt = txt[:3500] + "..."
-        await message.answer(f"```\n{txt}\n```", parse_mode="MarkdownV2")
+        await cb.message.edit_text(txt, reply_markup=admin_kb(state).as_markup())
+        await cb.answer()
 
     @dp.callback_query(F.data == "mode:menu")
     async def cb_mode_menu(cb: CallbackQuery) -> None:

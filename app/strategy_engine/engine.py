@@ -4,7 +4,8 @@ import asyncio
 import importlib
 import pkgutil
 from dataclasses import dataclass
-from typing import Any, Dict, List, Protocol
+from typing import Any, Dict, List, Protocol, Callable, Awaitable, Optional
+import contextlib
 
 from app.logging import logger
 
@@ -38,7 +39,7 @@ class StrategyContext:
 
 
 class StrategyEngine:
-    def __init__(self, spot_client: Any | None = None, perp_client: Any | None = None) -> None:
+    def __init__(self, spot_client: Any | None = None, perp_client: Any | None = None, notifier: Optional[Callable[[str, Dict[str, Any]], Awaitable[None]]] = None) -> None:
         self.strategies: Dict[str, StrategyPlugin] = {}
         self.enabled: Dict[str, bool] = {}
         self.mode: str = "paper"
@@ -46,6 +47,7 @@ class StrategyEngine:
         self._market_snapshot: Dict[str, Any] = {}
         self.spot_client = spot_client
         self.perp_client = perp_client
+        self.notifier = notifier
 
     def register(self, name: str, plugin: StrategyPlugin) -> None:
         self.strategies[name] = plugin
@@ -115,14 +117,29 @@ class StrategyEngine:
                     for intent in intents:
                         ok = await plugin.risk_check(ctx, intent)
                         if ok:
-                            await self._submit_order(intent)
+                            await self._submit_order(intent, name)
                 except Exception as exc:
                     logger.error("strategy.tick.error", name=name, error=str(exc))
             await asyncio.sleep(1.0)
 
-    async def _submit_order(self, intent: OrderIntent) -> None:
+    async def _submit_order(self, intent: OrderIntent, strategy_name: str) -> None:
         # For now, just log intent; integration to order queue can be added
         logger.info("strategy.order.intent", intent=intent.__dict__)
+        if self.notifier is not None:
+            payload = {
+                "event": "order_intent",
+                "strategy": strategy_name,
+                "symbol": intent.symbol,
+                "side": intent.side,
+                "type": intent.type,
+                "quantity": intent.quantity,
+                "price": intent.price,
+                "clientOrderId": intent.client_order_id,
+            }
+            try:
+                await self.notifier("order_intent", payload)
+            except Exception:
+                pass
 
     async def start(self) -> None:
         if self._bg_task is None or self._bg_task.done():
