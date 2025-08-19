@@ -176,13 +176,8 @@ class StrategyEngine:
         # Spot placement
         if self.spot_client and intent.symbol:
             await self._ratelimiter.acquire("trade")
-            order_type = None
-            if intent.type == "market":
-                # LBank market orders: use explicit buy_market / sell_market
-                order_type = "buy_market" if intent.side == "buy" else "sell_market"
-            else:
-                # Spot V2 supplement recommends buy/sell for limit
-                order_type = "buy" if intent.side == "buy" else "sell"
+            # LBank create_order accepts buy/sell; market is indicated by price=0
+            order_type = "buy" if intent.side == "buy" else "sell"
             # Prefer canonical symbol if available
             used_symbol = intent.symbol
             try:
@@ -198,6 +193,9 @@ class StrategyEngine:
             # For market, price=0; for limit, require price
             used_price = "0" if intent.type == "market" else (intent.price or "0")
             params["price"] = used_price
+            # Pass through client order id if provided (LBank supports custom_id)
+            if intent.client_order_id:
+                params["custom_id"] = intent.client_order_id
             try:
                 resp = await self.spot_client.create_order(params)
                 ok = False

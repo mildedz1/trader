@@ -127,6 +127,11 @@ class LBankSpotClient:
                 data["symbol"] = primary_symbol
             except Exception:
                 pass
+        # Normalize order type: use buy/sell only; market indicated by price=0
+        t = str(data.get("type", "")).lower()
+        if t in ("buy_market", "sell_market"):
+            data["type"] = "buy" if "buy" in t else "sell"
+            data["price"] = "0"
         headers, signed = self.signer.build_headers_and_signature(data)
         resp = await self.http.post("v2/supplement/create_order.do", data=signed, headers=headers)
         out = resp.json()
@@ -146,6 +151,11 @@ class LBankSpotClient:
                 candidates.append(sym.upper())
             for alt in candidates:
                 data_alt = {**params, **base, "symbol": alt}
+                # Preserve normalized type semantics
+                tt = str(data_alt.get("type", "")).lower()
+                if tt in ("buy_market", "sell_market"):
+                    data_alt["type"] = "buy" if "buy" in tt else "sell"
+                    data_alt["price"] = "0"
                 headers_alt, signed_alt = self.signer.build_headers_and_signature(data_alt)
                 resp_alt = await self.http.post("v2/supplement/create_order.do", data=signed_alt, headers=headers_alt)
                 out_alt = resp_alt.json()
