@@ -83,6 +83,8 @@ def admin_kb(state: AppState) -> InlineKeyboardBuilder:
     kb.button(text="Spot Balance", callback_data="spot:balance")
     kb.button(text=("Demo: ON" if state.demo else "Demo: OFF"), callback_data="demo:toggle")
     kb.button(text="Demo Report", callback_data="demo:report")
+    kb.button(text="Demo Start Grid", callback_data="demo:start")
+    kb.button(text="Demo Stop Grid", callback_data="demo:stop")
     kb.button(text="Perp Balance (LBank sample)", callback_data="perp:balance")
     kb.button(text="Strategies", callback_data="strat:menu")
     kb.button(text="Time Drift", callback_data="time:drift")
@@ -324,6 +326,30 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             await cb.message.edit_text(f"Demo report error: {exc}", reply_markup=admin_kb(state).as_markup())
         finally:
             await cb.answer()
+
+    @dp.callback_query(F.data == "demo:start")
+    async def cb_demo_start(cb: CallbackQuery) -> None:
+        if not state.demo:
+            await cb.answer("Demo is OFF", show_alert=True)
+            return
+        # enable grid strategy automatically and switch engine to live
+        names = [x["name"] for x in engine.list()]
+        for nm in names:
+            if nm.endswith("grid_spot"):
+                engine.set_enabled(nm, True)
+        engine.mode = "live"
+        await cb.message.edit_text("Demo grid started (engine=live)", reply_markup=admin_kb(state).as_markup())
+        await cb.answer()
+
+    @dp.callback_query(F.data == "demo:stop")
+    async def cb_demo_stop(cb: CallbackQuery) -> None:
+        # disable all strategies and set engine to signal
+        names = [x["name"] for x in engine.list()]
+        for nm in names:
+            engine.set_enabled(nm, False)
+        engine.mode = "signal"
+        await cb.message.edit_text("Demo grid stopped (engine=signal)", reply_markup=admin_kb(state).as_markup())
+        await cb.answer()
 
     @dp.callback_query(F.data == "strat:menu")
     async def cb_strat_menu(cb: CallbackQuery) -> None:
