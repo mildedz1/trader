@@ -15,6 +15,7 @@ from app.lbank_perp.time_source import fetch_perp_server_time_ms
 from app.time_sync import TimeSynchronizer
 from app.lbank_spot import LBankSpotClient
 from app.lbank_perp import LBankPerpClient
+from app.strategy_engine.engine import StrategyEngine
 
 
 class AppState:
@@ -69,6 +70,7 @@ def admin_kb(state: AppState) -> InlineKeyboardBuilder:
     kb.button(text=f"Mode: {state.mode}", callback_data="mode:menu")
     kb.button(text="Spot Balance", callback_data="spot:balance")
     kb.button(text="Perp Balance", callback_data="perp:balance")
+    kb.button(text="Strategies", callback_data="strat:menu")
     kb.button(text="Time Drift", callback_data="time:drift")
     kb.adjust(1)
     return kb
@@ -90,6 +92,9 @@ async def run_bot(stop_event: asyncio.Event) -> None:
 
     state = AppState()
     await state.start()
+    engine = StrategyEngine(spot_client=state.spot_client, perp_client=state.perp_client)
+    engine.load_plugins()
+    await engine.start()
 
     admin_ids: Sequence[int] = [int(x) for x in settings.admin_telegram_user_ids.split(",") if x.strip()]
 
@@ -123,6 +128,33 @@ async def run_bot(stop_event: asyncio.Event) -> None:
     async def cb_admin_home(cb: CallbackQuery) -> None:
         await cb.message.edit_text("Admin Dashboard", reply_markup=admin_kb(state).as_markup())
         await cb.answer()
+
+    @dp.callback_query(F.data == "strat:menu")
+    async def cb_strat_menu(cb: CallbackQuery) -> None:
+        items = engine.list()
+        lines = ["Strategies:"]
+        for it in items:
+            lines.append(f"- {it['name']} [{it['scope']}] => {'ON' if it['enabled'] else 'OFF'}")
+        lines.append("\nToggle: /strat_toggle <name>")
+        await cb.message.edit_text("\n".join(lines), reply_markup=admin_kb(state).as_markup())
+        await cb.answer()
+
+    @dp.message(F.text.startswith("/strat_toggle"))
+    async def on_strat_toggle(message: Message) -> None:
+        if not is_admin(message.from_user.id if message.from_user else None):
+            await message.answer("Unauthorized")
+            return
+        parts = message.text.strip().split()
+        if len(parts) < 2:
+            await message.answer("Usage: /strat_toggle <name>")
+            return
+        name = parts[1]
+        cur = next((x for x in engine.list() if x["name"].endswith(name) or x["name"] == name), None)
+        if not cur:
+            await message.answer("Strategy not found")
+            return
+        engine.set_enabled(cur["name"], not cur["enabled"])
+        await message.answer(f"{cur['name']} => {'ON' if not cur['enabled'] else 'OFF'}")
 
     @dp.callback_query(F.data == "mode:menu")
     async def cb_mode_menu(cb: CallbackQuery) -> None:
@@ -224,6 +256,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
         try:
             await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), stop_event=stop_event)
         finally:
+            await engine.stop()
             await state.stop()
 
     await _runner()
