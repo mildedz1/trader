@@ -21,6 +21,9 @@ class GridConfig:
     recalc_sec: int = 5
     default_stop_loss_pct: float = 0.02
     default_take_profit_pct: float = 0.02
+    order_sizing: str = "static"  # "static" | "balance_pct"
+    balance_pct_per_order: float = 0.5  # percent of free quote per order if balance_pct
+    cadence_sec: int = 300  # resend signal pack every N seconds even if no recenter
 
 
 def _build_levels(center: float, cfg: GridConfig) -> Tuple[List[float], List[float], float, float]:
@@ -51,6 +54,7 @@ class GridSpotStrategy:
     _center: float | None = None
     _band: Tuple[float, float] | None = None
     _last_recalc_ts: float = 0.0
+    _last_signal_ts: float = 0.0
     _active_prices: Dict[str, str] = field(default_factory=dict)  # price -> side
 
     async def on_startup(self, ctx) -> None:
@@ -94,27 +98,69 @@ class GridSpotStrategy:
         buys, sells, lo, up = _build_levels(self._center, self.cfg)
         desired = {**{_format_decimal(p): "buy" for p in buys}, **{_format_decimal(p): "sell" for p in sells}}
 
-        # Place missing levels (compared to active set)
-        for price_str, side in desired.items():
-            if price_str not in self._active_prices:
-                price = float(price_str)
-                amount = self.cfg.quote_per_order / price
-                # basic SL/TP around the level price
-                sl = price * (1 - self.cfg.default_stop_loss_pct) if side == "buy" else price * (1 + self.cfg.default_stop_loss_pct)
-                tp = price * (1 + self.cfg.default_take_profit_pct) if side == "buy" else price * (1 - self.cfg.default_take_profit_pct)
-                intents.append(
-                    OrderIntent(
-                        symbol=self.cfg.symbol,
-                        side=side,
-                        type="limit",  # engine will map to maker when placing
-                        quantity=_format_decimal(amount),
-                        price=price_str,
-                        client_order_id=f"grid_{side}_{price_str}",
-                        stop_loss=_format_decimal(sl),
-                        take_profit=_format_decimal(tp),
-                    )
+        now = time.time()
+        cadence_due = (now - self._last_signal_ts) >= self.cfg.cadence_sec if self.cfg.cadence_sec > 0 else False
+
+        # Determine sizing from balance if requested
+        free_quote, free_base = await self._get_free_balances(ctx)
+        def per_order_amount(side: str, price: float) -> float:
+            if self.cfg.order_sizing == "balance_pct" and free_quote is not None:
+                quote_budget = (free_quote * (self.cfg.balance_pct_per_order / 100.0))
+            else:
+                quote_budget = self.cfg.quote_per_order
+            amt = quote_budget / price
+            if side == "sell" and free_base is not None and len(sells) > 0:
+                # do not exceed per-order base capacity
+                amt = min(amt, max(0.0, free_base / len(sells)))
+            return max(0.0, amt)
+
+        def add_intent(side: str, price_str: str) -> None:
+            price = float(price_str)
+            amount = per_order_amount(side, price)
+            if amount <= 0:
+                return
+            sl = price * (1 - self.cfg.default_stop_loss_pct) if side == "buy" else price * (1 + self.cfg.default_stop_loss_pct)
+            tp = price * (1 + self.cfg.default_take_profit_pct) if side == "buy" else price * (1 - self.cfg.default_take_profit_pct)
+            intents.append(
+                OrderIntent(
+                    symbol=self.cfg.symbol,
+                    side=side,
+                    type="limit",
+                    quantity=_format_decimal(amount),
+                    price=price_str,
+                    client_order_id=f"grid_{side}_{price_str}",
+                    stop_loss=_format_decimal(sl),
+                    take_profit=_format_decimal(tp),
                 )
-                self._active_prices[price_str] = side
+            )
+
+        if cadence_due:
+            # pick at most 3 evenly spaced per side
+            def pick(prices: List[float], k: int) -> List[str]:
+                n = len(prices)
+                if n <= k:
+                    return [_format_decimal(p) for p in prices]
+                idxs = [round(i * (n - 1) / (k - 1)) for i in range(k)]
+                seen = set()
+                out = []
+                for i in idxs:
+                    if i not in seen:
+                        out.append(_format_decimal(prices[i]))
+                        seen.add(i)
+                return out
+            for ps in pick(buys, 3):
+                add_intent("buy", ps)
+            for ps in pick(sells, 3):
+                add_intent("sell", ps)
+        else:
+            # Place missing levels compared to active set
+            for price_str, side in desired.items():
+                if price_str not in self._active_prices:
+                    add_intent(side, price_str)
+                    self._active_prices[price_str] = side
+
+        if intents:
+            self._last_signal_ts = now
         return intents
 
     async def risk_check(self, ctx, order: OrderIntent) -> bool:
@@ -196,6 +242,9 @@ class GridSpotStrategy:
                 "levels_per_side": self.cfg.levels_per_side,
                 "grid_band_pct": [self.cfg.lower_pct, self.cfg.upper_pct],
                 "recenter_on_break": self.cfg.recenter_on_break,
+                "order_sizing": self.cfg.order_sizing,
+                "balance_pct_per_order": self.cfg.balance_pct_per_order if self.cfg.order_sizing == "balance_pct" else None,
+                "cadence_sec": self.cfg.cadence_sec,
             },
             "current": {
                 "center": self._center,
@@ -205,6 +254,48 @@ class GridSpotStrategy:
             },
             "ready": bool(self._center and last),
         }
+
+    async def _get_free_balances(self, ctx) -> tuple[float | None, float | None]:
+        # returns (free_quote, free_base)
+        try:
+            if not ctx.spot_client:
+                return None, None
+            resp = await ctx.spot_client.user_info_account()
+            base, quote = self._parse_symbol_assets(self.cfg.symbol)
+            free_base = None
+            free_quote = None
+            balances = []
+            if isinstance(resp, dict):
+                d = resp.get("data") or resp
+                balances = d.get("balances") or d.get("balance") or []
+            for b in balances:
+                asset = (b.get("asset") or b.get("currency") or b.get("coin") or "").lower()
+                free = b.get("free") or b.get("available")
+                try:
+                    fv = float(str(free)) if free is not None else 0.0
+                except Exception:
+                    fv = 0.0
+                if asset == base:
+                    free_base = fv
+                if asset == quote:
+                    free_quote = fv
+            return free_quote, free_base
+        except Exception:
+            return None, None
+
+    @staticmethod
+    def _parse_symbol_assets(symbol: str) -> tuple[str, str]:
+        s = symbol.lower()
+        if "_" in s:
+            a, q = s.split("_", 2)
+            return a, q
+        if "-" in s:
+            a, q = s.split("-", 2)
+            return a, q
+        # fallback guess
+        if s.endswith("usdt"):
+            return s[:-4], "usdt"
+        return s, "usdt"
 
 
 def get_strategy():
