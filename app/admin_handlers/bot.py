@@ -4,6 +4,7 @@ import asyncio
 from typing import Sequence
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.utils.token import validate_token, TokenValidationError
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -92,7 +93,13 @@ def mode_kb(current: str) -> InlineKeyboardBuilder:
 
 
 async def run_bot(stop_event: asyncio.Event) -> None:
-    bot = Bot(token=settings.telegram_bot_token)
+    # Normalize and validate Telegram token to avoid whitespace/quote issues
+    raw_token = (settings.telegram_bot_token or "").strip().strip('"').strip("'")
+    try:
+        validate_token(raw_token)
+    except TokenValidationError as exc:
+        raise ValueError("Invalid TELEGRAM_BOT_TOKEN. Please check your .env and remove quotes/spaces.") from exc
+    bot = Bot(token=raw_token)
     dp = Dispatcher()
 
     state = AppState()
