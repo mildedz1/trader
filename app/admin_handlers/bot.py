@@ -107,7 +107,7 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             except Exception:
                 return None
 
-        msgs: list[tuple[str, str]] = []  # (text, parse_mode)
+        msgs: list[tuple[str, str | None]] = []  # (text, parse_mode)
         if event in ("order_intent_batch", "order_live_batch"):
             intents = payload.get("intents", [])
             buys = [it for it in intents if it.get("side") == "buy"]
@@ -143,48 +143,35 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             center = cur.get("center")
             band = cur.get("band")
 
-            # build HTML message with <pre> table
-            header = f"<b>{title}</b> · <b>{payload.get('strategy')}</b> · <b>{symbol}</b> · حالت: <b>{mode}</b>"
+            # build plain text message, grouped and tidy
+            header = f"{title} · {payload.get('strategy')} · {symbol} · حالت: {mode}"
             if center and band:
                 header += f"\n🎯 مرکز: {center} · باند: {band[0]} — {band[1]}"
 
-            def render_rows(side_label: str, items: list[dict]) -> list[str]:
-                rows = []
-                for it in items:
+            lines: list[str] = [header]
+            if buys:
+                lines.append("🟢 خریدها:")
+                for idx, it in enumerate(buys, 1):
                     p = it.get('price')
                     q = fmt_qty(it.get('quantity'))
                     sl = it.get('stop_loss') or "-"
                     tp = it.get('take_profit') or "-"
                     d = pct(p, center) if center else None
                     d_s = (f"{d:+.2f}%" if d is not None else "-")
-                    rows.append([side_label, q, str(p), d_s, str(sl), str(tp)])
-                # compute widths
-                widths = [0] * 6
-                for r in rows:
-                    for i, col in enumerate(r):
-                        widths[i] = max(widths[i], len(col))
-                # header row
-                hdr = ["نوع", "مقدار", "قیمت", "%فاصله", "SL", "TP"]
-                for i, col in enumerate(hdr):
-                    widths[i] = max(widths[i], len(col))
-                def fmt_row(r):
-                    return " ".join(col.rjust(widths[i]) for i, col in enumerate(r))
-                out = [fmt_row(hdr)]
-                out.append(" ".join("-" * w for w in widths))
-                out.extend(fmt_row(r) for r in rows)
-                return out
-
-            table_lines: list[str] = []
-            if buys:
-                table_lines.extend(render_rows("خرید", buys))
+                    lines.append(f"{idx}. 📦 {q} | 💲 {p} | Δ {d_s} | ⛔️ SL {sl} | 🎯 TP {tp}")
             if sells:
-                if table_lines:
-                    table_lines.append("")
-                table_lines.extend(render_rows("فروش", sells))
+                lines.append("🔴 فروش‌ها:")
+                for idx, it in enumerate(sells, 1):
+                    p = it.get('price')
+                    q = fmt_qty(it.get('quantity'))
+                    sl = it.get('stop_loss') or "-"
+                    tp = it.get('take_profit') or "-"
+                    d = pct(p, center) if center else None
+                    d_s = (f"{d:+.2f}%" if d is not None else "-")
+                    lines.append(f"{idx}. 📦 {q} | 💲 {p} | Δ {d_s} | ⛔️ SL {sl} | 🎯 TP {tp}")
 
-            body = "\n".join(table_lines)
-            text = header + f"\n<pre>{body}</pre>"
-            msgs.append((text, "HTML"))
+            text = "\n".join(lines)
+            msgs.append((text, None))
         else:
             text = f"[{event}] {payload.get('strategy')} {payload.get('symbol')} {payload.get('side')} {payload.get('quantity')} @ {payload.get('price')}"
             msgs.append((text, None))
