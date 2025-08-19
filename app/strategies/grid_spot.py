@@ -68,6 +68,8 @@ class GridSpotStrategy:
         # Do NOT pre-populate active levels; emit initial placement intents in on_signal
         self._active_prices.clear()
         self._recenter_pending = True
+        # force immediate signal pack on startup
+        self._last_signal_ts = 0.0
 
     async def on_tick(self, ctx, market: Dict[str, Any]) -> None:
         now = time.time()

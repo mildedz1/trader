@@ -67,7 +67,11 @@ class StrategyEngine:
 
     def set_enabled(self, name: str, value: bool) -> None:
         if name in self.strategies:
+            was = self.enabled.get(name, False)
             self.enabled[name] = value
+            if value and not was:
+                # Run plugin startup when enabling to allow initial signals
+                asyncio.create_task(self._startup_plugin(name))
 
     def load_plugins(self, package: str = "app.strategies") -> List[str]:
         loaded: List[str] = []
@@ -239,4 +243,13 @@ class StrategyEngine:
                 d = {"error": str(exc)}
             items.append({"name": name, "enabled": self.enabled.get(name, False), **d})
         return items
+
+    async def _startup_plugin(self, name: str) -> None:
+        plugin = self.strategies.get(name)
+        if plugin is None:
+            return
+        try:
+            await plugin.on_startup(self._build_ctx())
+        except Exception as exc:
+            logger.error("strategy.enable.startup.error", name=name, error=str(exc))
 
