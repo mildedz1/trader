@@ -21,8 +21,11 @@ class GridConfig:
     recalc_sec: int = 5
     default_stop_loss_pct: float = 0.02
     default_take_profit_pct: float = 0.02
-    order_sizing: str = "balance_pct"  # "static" | "balance_pct"
+    order_sizing: str = "fixed_total_pct"  # "static" | "balance_pct" | "fixed_total_pct"
     balance_pct_per_order: float = 10.0  # percent of free quote per order if balance_pct
+    total_budget_usdt: float = 2.8  # used when order_sizing = fixed_total_pct
+    per_order_pct_of_total: float = 5.0  # percent of total budget per order
+    min_notional_usdt: float = 0.0  # min notional for live; in signal mode ignored
     cadence_sec: int = 300  # resend signal pack every N seconds even if no recenter
 
 
@@ -110,6 +113,8 @@ class GridSpotStrategy:
         def per_order_amount(side: str, price: float) -> float:
             if self.cfg.order_sizing == "balance_pct" and free_quote is not None:
                 quote_budget = (free_quote * (self.cfg.balance_pct_per_order / 100.0))
+            elif self.cfg.order_sizing == "fixed_total_pct":
+                quote_budget = (self.cfg.total_budget_usdt * (self.cfg.per_order_pct_of_total / 100.0))
             else:
                 quote_budget = self.cfg.quote_per_order
             amt = quote_budget / price
@@ -168,12 +173,15 @@ class GridSpotStrategy:
         return intents
 
     async def risk_check(self, ctx, order: OrderIntent) -> bool:
-        # Basic min notional: 5 USDT assumed for spot is usually lower; adjust as needed
+        # In signal mode, always allow signal
+        if ctx.mode == "signal":
+            return True
         try:
             notional = float(order.quantity) * (float(order.price) if order.price else 0.0)
         except Exception:
             return False
-        return notional >= 5.0
+        min_notional = max(0.0, self.cfg.min_notional_usdt)
+        return notional >= min_notional
 
     async def _fetch_last_price(self, ctx) -> float | None:
         if not ctx.spot_client:
@@ -242,12 +250,16 @@ class GridSpotStrategy:
             "scope": self.scope,
             "symbol": self.cfg.symbol,
             "required": {
-                "min_notional_usdt": 5.0,
+                "min_notional_usdt": self.cfg.min_notional_usdt,
                 "levels_per_side": self.cfg.levels_per_side,
                 "grid_band_pct": [self.cfg.lower_pct, self.cfg.upper_pct],
                 "recenter_on_break": self.cfg.recenter_on_break,
                 "order_sizing": self.cfg.order_sizing,
                 "balance_pct_per_order": self.cfg.balance_pct_per_order if self.cfg.order_sizing == "balance_pct" else None,
+                "fixed_total": {
+                    "total_budget_usdt": self.cfg.total_budget_usdt,
+                    "per_order_pct": self.cfg.per_order_pct_of_total,
+                } if self.cfg.order_sizing == "fixed_total_pct" else None,
                 "cadence_sec": self.cfg.cadence_sec,
             },
             "current": {
