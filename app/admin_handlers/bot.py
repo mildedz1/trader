@@ -108,19 +108,67 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             sells = [it for it in intents if it.get("side") == "sell"]
             symbol = intents[0].get("symbol") if intents else "-"
             mode = payload.get("mode")
-            title = "اجرای زنده" if event == "order_live_batch" else "سیگنال"
-            # فقط 6 سطح (3 خرید + 3 فروش) را نمایش بده
-            buys = buys[:3]
-            sells = sells[:3]
-            lines = [f"{title} استراتژی {payload.get('strategy')} ({mode}) — {symbol}"]
+            title = ("⚡️ اجرای زنده" if event == "order_live_batch" else "🔔 سیگنال")
+
+            # مرتب‌سازی و انتخاب سطوح با فاصله یکنواخت (بر اساس قیمت)
+            def pick_levels(items, k=3):
+                try:
+                    items = sorted(items, key=lambda x: float(x.get("price") or 0.0))
+                except Exception:
+                    items = items[:]
+                n = len(items)
+                if n <= k:
+                    return items
+                # اندیس‌های تقریباً با فاصله یکنواخت
+                idxs = [round(i*(n-1)/(k-1)) for i in range(k)]
+                seen = set()
+                picked = []
+                for i in idxs:
+                    if i not in seen:
+                        picked.append(items[i])
+                        seen.add(i)
+                return picked
+
+            buys = pick_levels(buys, 3)
+            sells = pick_levels(sells, 3)
+
+            # مرجع برای درصد فاصله: میانگین قیمت‌ها اگر در دسترس باشد
+            import math
+            def to_f(x):
+                try:
+                    return float(x)
+                except Exception:
+                    return math.nan
+            all_prices = [to_f(it.get("price")) for it in (buys + sells) if to_f(it.get("price")) == to_f(it.get("price"))]
+            ref = sum(all_prices)/len(all_prices) if all_prices else None
+
+            lines = [f"{title} · {payload.get('strategy')} · {symbol} · حالت: {mode}"]
             if buys:
-                lines.append("خریدها:")
+                lines.append("🟢 خریدها:")
                 for it in buys:
-                    lines.append(f"- خرید {fmt_qty(it['quantity'])} @ {it['price']}")
+                    p = it.get('price')
+                    q = fmt_qty(it.get('quantity'))
+                    delta = ""
+                    if ref:
+                        try:
+                            dp = (float(p) - ref)/ref*100.0
+                            delta = f" (↘️ {abs(dp):.2f}%)" if dp < 0 else f" (↗️ {abs(dp):.2f}%)"
+                        except Exception:
+                            delta = ""
+                    lines.append(f"• خرید: 📦 {q} · 💲 {p}{delta}")
             if sells:
-                lines.append("فروش‌ها:")
+                lines.append("🔴 فروش‌ها:")
                 for it in sells:
-                    lines.append(f"- فروش {fmt_qty(it['quantity'])} @ {it['price']}")
+                    p = it.get('price')
+                    q = fmt_qty(it.get('quantity'))
+                    delta = ""
+                    if ref:
+                        try:
+                            dp = (float(p) - ref)/ref*100.0
+                            delta = f" (↗️ {abs(dp):.2f}%)" if dp > 0 else f" (↘️ {abs(dp):.2f}%)"
+                        except Exception:
+                            delta = ""
+                    lines.append(f"• فروش: 📦 {q} · 💲 {p}{delta}")
             msgs.append("\n".join(lines))
         else:
             # fallback single intent
