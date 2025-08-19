@@ -18,6 +18,8 @@ class OrderIntent:
     quantity: str
     price: str | None = None
     client_order_id: str | None = None
+    stop_loss: str | None = None
+    take_profit: str | None = None
 
 
 class StrategyPlugin(Protocol):
@@ -175,6 +177,14 @@ class StrategyEngine:
         if self.notifier is None:
             return
         event = "order_live_batch" if live else "order_intent_batch"
+        # attach strategy diagnostics if available
+        desc: Dict[str, Any] | None = None
+        try:
+            plugin = self.strategies.get(strategy_name)
+            if plugin is not None:
+                desc = await plugin.describe(self._build_ctx())
+        except Exception:
+            desc = None
         payload = {
             "event": event,
             "strategy": strategy_name,
@@ -190,6 +200,7 @@ class StrategyEngine:
                 }
                 for it in intents
             ],
+            "desc": desc,
         }
         try:
             await self.notifier(event, payload)

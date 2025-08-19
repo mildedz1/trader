@@ -143,6 +143,11 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             ref = sum(all_prices)/len(all_prices) if all_prices else None
 
             lines = [f"{title} · {payload.get('strategy')} · {symbol} · حالت: {mode}"]
+            # If strategy description present, show band/center
+            desc = payload.get("desc") or {}
+            cur = desc.get("current") or {}
+            if cur.get("center") and cur.get("band"):
+                lines.append(f"🎯 مرکز: {cur['center']} · باند: {cur['band'][0]} — {cur['band'][1]}")
             if buys:
                 lines.append("🟢 خریدها:")
                 for it in buys:
@@ -155,7 +160,9 @@ async def run_bot(stop_event: asyncio.Event) -> None:
                             delta = f" (↘️ {abs(dp):.2f}%)" if dp < 0 else f" (↗️ {abs(dp):.2f}%)"
                         except Exception:
                             delta = ""
-                    lines.append(f"• خرید: 📦 {q} · 💲 {p}{delta}")
+                    sl = it.get('stop_loss')
+                    tp = it.get('take_profit')
+                    lines.append(f"• خرید: 📦 {q} · 💲 {p}{delta}  · ⛔️ SL {sl} · 🎯 TP {tp}")
             if sells:
                 lines.append("🔴 فروش‌ها:")
                 for it in sells:
@@ -168,7 +175,9 @@ async def run_bot(stop_event: asyncio.Event) -> None:
                             delta = f" (↗️ {abs(dp):.2f}%)" if dp > 0 else f" (↘️ {abs(dp):.2f}%)"
                         except Exception:
                             delta = ""
-                    lines.append(f"• فروش: 📦 {q} · 💲 {p}{delta}")
+                    sl = it.get('stop_loss')
+                    tp = it.get('take_profit')
+                    lines.append(f"• فروش: 📦 {q} · 💲 {p}{delta}  · ⛔️ SL {sl} · 🎯 TP {tp}")
             msgs.append("\n".join(lines))
         else:
             # fallback single intent

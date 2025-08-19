@@ -19,6 +19,8 @@ class GridConfig:
     recenter_on_break: bool = True
     kill_switch_pct: float = 0.06
     recalc_sec: int = 5
+    default_stop_loss_pct: float = 0.02
+    default_take_profit_pct: float = 0.02
 
 
 def _build_levels(center: float, cfg: GridConfig) -> Tuple[List[float], List[float], float, float]:
@@ -97,6 +99,9 @@ class GridSpotStrategy:
             if price_str not in self._active_prices:
                 price = float(price_str)
                 amount = self.cfg.quote_per_order / price
+                # basic SL/TP around the level price
+                sl = price * (1 - self.cfg.default_stop_loss_pct) if side == "buy" else price * (1 + self.cfg.default_stop_loss_pct)
+                tp = price * (1 + self.cfg.default_take_profit_pct) if side == "buy" else price * (1 - self.cfg.default_take_profit_pct)
                 intents.append(
                     OrderIntent(
                         symbol=self.cfg.symbol,
@@ -105,6 +110,8 @@ class GridSpotStrategy:
                         quantity=_format_decimal(amount),
                         price=price_str,
                         client_order_id=f"grid_{side}_{price_str}",
+                        stop_loss=_format_decimal(sl),
+                        take_profit=_format_decimal(tp),
                     )
                 )
                 self._active_prices[price_str] = side
