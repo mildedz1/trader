@@ -24,7 +24,7 @@ class GridConfig:
     order_sizing: str = "fixed_total_pct"  # "static" | "balance_pct" | "fixed_total_pct"
     balance_pct_per_order: float = 10.0  # percent of free quote per order if balance_pct
     total_budget_usdt: float = 2.8  # used when order_sizing = fixed_total_pct
-    per_order_pct_of_total: float = 10.0  # percent of total budget per order
+    per_order_pct_of_total: float = 20.0  # percent of total budget per order
     min_notional_usdt: float = 0.0  # min notional for live; in signal mode ignored
     cadence_sec: int = 300  # resend signal pack every N seconds even if no recenter
 
