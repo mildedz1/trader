@@ -10,7 +10,12 @@ from app.time_sync import TimeSynchronizer
 from app.logging import logger
 
 
-SPOT_BASE_URLS = ["https://api.lbkex.com/", "https://api.lbank.info/"]
+SPOT_BASE_URLS = [
+    "https://api.lbkex.com/",
+    "https://api.lbank.info/",
+    # Some regions route supplement endpoints differently
+    "https://api.lbkex.net/",
+]
 
 
 class LBankSpotClient:
@@ -132,9 +137,13 @@ class LBankSpotClient:
         if t in ("buy_market", "sell_market"):
             data["type"] = "buy" if "buy" in t else "sell"
             data["price"] = "0"
-        headers, signed = self.signer.build_headers_and_signature(data)
-        resp = await self.http.post("v2/supplement/create_order.do", data=signed, headers=headers)
-        out = resp.json()
+        async def _post_with(http: HttpClient, payload: Dict[str, str]) -> Dict[str, Any]:
+            headers, signed = self.signer.build_headers_and_signature(payload)
+            resp = await http.post("v2/supplement/create_order.do", data=signed, headers=headers)
+            return resp.json()
+
+        # Try primary base first
+        out = await _post_with(self.http, data)
         # Fallback attempts if currency pair nonsupport: try lowercase and uppercase variants
         try:
             code = (out or {}).get("error_code")
@@ -156,15 +165,37 @@ class LBankSpotClient:
                 if tt in ("buy_market", "sell_market"):
                     data_alt["type"] = "buy" if "buy" in tt else "sell"
                     data_alt["price"] = "0"
-                headers_alt, signed_alt = self.signer.build_headers_and_signature(data_alt)
-                resp_alt = await self.http.post("v2/supplement/create_order.do", data=signed_alt, headers=headers_alt)
-                out_alt = resp_alt.json()
+                out_alt = await _post_with(self.http, data_alt)
                 try:
                     code_alt = (out_alt or {}).get("error_code")
                 except Exception:
                     code_alt = None
                 if not code_alt:
                     return out_alt
+            # If still failing, try alternate base URLs for same payload
+            for base_url in SPOT_BASE_URLS:
+                if self.base_url == base_url.rstrip("/") + "/":
+                    continue
+                http_alt = HttpClient(base_url)
+                try:
+                    await http_alt.open()
+                    # try original data, then candidates again
+                    out_altbase = await _post_with(http_alt, data)
+                    code_altbase = (out_altbase or {}).get("error_code")
+                    if not code_altbase:
+                        return out_altbase
+                    for alt in candidates:
+                        data_alt2 = {**params, **base, "symbol": alt}
+                        tt = str(data_alt2.get("type", "")).lower()
+                        if tt in ("buy_market", "sell_market"):
+                            data_alt2["type"] = "buy" if "buy" in tt else "sell"
+                            data_alt2["price"] = "0"
+                        out_alt2 = await _post_with(http_alt, data_alt2)
+                        code_alt2 = (out_alt2 or {}).get("error_code")
+                        if not code_alt2:
+                            return out_alt2
+                finally:
+                    await http_alt.close()
         return out
 
     async def cancel_order(self, params: Dict[str, str]) -> Dict[str, Any]:
