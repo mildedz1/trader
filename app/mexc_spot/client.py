@@ -115,9 +115,9 @@ class MexcSpotClient:
         if side:
             data["side"] = str(side).upper()
         else:
-            # If engine passes type like buy/sell, infer from earlier logic
-            t = params.get("type", "")
-            data["side"] = "BUY" if "buy" in str(t).lower() else "SELL"
+            # Infer side from type fallback (buy_market/sell_market or buy/sell)
+            t = str(params.get("type", "")).lower()
+            data["side"] = "BUY" if "buy" in t else "SELL"
 
         qty = params.get("amount") or params.get("quantity")
         if qty is not None:
@@ -126,18 +126,22 @@ class MexcSpotClient:
         if price is not None and data.get("type") == "LIMIT":
             data["price"] = str(price)
             data["timeInForce"] = "GTC"
+        elif data.get("type") == "LIMIT" and "timeInForce" not in data:
+            # Ensure timeInForce exists for LIMIT even if price provided later
+            data["timeInForce"] = "GTC"
 
         # clientOrderId if provided
         coid = params.get("custom_id") or params.get("clientOrderId")
         if coid:
             data["newClientOrderId"] = str(coid)
 
-        # Build signed form body or query
+        # Build signed query string (MEXC expects signed params in URL query)
+        # Add a standard recvWindow to reduce timestamp strictness
+        data.setdefault("recvWindow", "5000")
         auth = await self._auth_params(data)
         q = self._signed_query(auth)
-        # Send as application/x-www-form-urlencoded as widely supported
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        resp = await self.http.post("api/v3/order", data=q, headers=headers)
+        # Send POST with no body; parameters are in query string
+        resp = await self.http.post(f"api/v3/order?{q}")
         return resp.json()
 
     async def cancel_order(self, params: Dict[str, str]) -> Dict[str, Any]:
