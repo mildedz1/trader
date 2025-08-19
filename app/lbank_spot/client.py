@@ -15,6 +15,8 @@ SPOT_BASE_URLS = [
     "https://api.lbank.info/",
     # Some regions route supplement endpoints differently
     "https://api.lbkex.net/",
+    # Web domain sometimes carries private endpoints
+    "https://www.lbkex.net/",
 ]
 
 
@@ -137,14 +139,14 @@ class LBankSpotClient:
         if t in ("buy_market", "sell_market"):
             data["type"] = "buy" if "buy" in t else "sell"
             data["price"] = "0"
-        async def _post_with(http: HttpClient, payload: Dict[str, str]) -> Dict[str, Any]:
+        async def _post_with(http: HttpClient, payload: Dict[str, str], path: str) -> Dict[str, Any]:
             headers, signed = self.signer.build_headers_and_signature(payload)
-            resp = await http.post("v2/supplement/create_order.do", data=signed, headers=headers)
+            resp = await http.post(path, data=signed, headers=headers)
             return resp.json()
 
         # Try primary base first
         try:
-            out = await _post_with(self.http, data)
+            out = await _post_with(self.http, data, "v2/supplement/create_order.do")
         except Exception as exc:
             # Network/DNS error: try alternates immediately
             out = {"error_code": -1, "msg": str(exc)}
@@ -162,6 +164,24 @@ class LBankSpotClient:
                 candidates.append(sym.lower())
             if sym.upper() != sym:
                 candidates.append(sym.upper())
+            # Try alternate separators
+            def alt_seps(s: str) -> list[str]:
+                out_syms: list[str] = []
+                s_low = s.lower()
+                base, quote = (s_low.split("_", 1) if "_" in s_low else (s_low, ""))
+                if quote:
+                    out_syms += [
+                        f"{base}_{quote}",
+                        f"{base}-{quote}",
+                        f"{base}/{quote}",
+                        f"{base.upper()}_{quote.upper()}",
+                        f"{base.upper()}-{quote.upper()}",
+                        f"{base.upper()}/{quote.upper()}",
+                    ]
+                return out_syms
+            for altf in alt_seps(sym):
+                if altf not in candidates:
+                    candidates.append(altf)
             for alt in candidates:
                 data_alt = {**params, **base, "symbol": alt}
                 # Preserve normalized type semantics
@@ -169,43 +189,53 @@ class LBankSpotClient:
                 if tt in ("buy_market", "sell_market"):
                     data_alt["type"] = "buy" if "buy" in tt else "sell"
                     data_alt["price"] = "0"
-                out_alt = await _post_with(self.http, data_alt)
+                out_alt = await _post_with(self.http, data_alt, "v2/supplement/create_order.do")
                 try:
                     code_alt = (out_alt or {}).get("error_code")
                 except Exception:
                     code_alt = None
                 if not code_alt:
                     return out_alt
-            # If still failing, try alternate base URLs for same payload
+            # If still failing, try alternate param key (pair) and endpoints and base URLs
+            def build_variants(symbol_value: str) -> list[Dict[str, str]]:
+                v: list[Dict[str, str]] = []
+                common = {k: v for k, v in data.items() if k not in ("symbol", "pair")}
+                v.append({**common, "symbol": symbol_value})
+                v.append({**common, "pair": symbol_value})
+                return v
+
+            endpoint_paths = [
+                "v2/supplement/create_order.do",
+                "v2/create_order.do",
+            ]
+
             for base_url in SPOT_BASE_URLS:
                 if self.base_url == base_url.rstrip("/") + "/":
                     continue
                 http_alt = HttpClient(base_url)
                 try:
                     await http_alt.open()
-                    # try original data, then candidates again
-                    try:
-                        out_altbase = await _post_with(http_alt, data)
-                    except Exception:
-                        # DNS/network error on this host; try next host
-                        continue
-                    code_altbase = (out_altbase or {}).get("error_code")
-                    if not code_altbase:
-                        return out_altbase
-                    for alt in candidates:
-                        data_alt2 = {**params, **base, "symbol": alt}
-                        tt = str(data_alt2.get("type", "")).lower()
-                        if tt in ("buy_market", "sell_market"):
-                            data_alt2["type"] = "buy" if "buy" in tt else "sell"
-                            data_alt2["price"] = "0"
-                        try:
-                            out_alt2 = await _post_with(http_alt, data_alt2)
-                        except Exception:
-                            # DNS/network error on this host; try next candidate/host
-                            continue
-                        code_alt2 = (out_alt2 or {}).get("error_code")
-                        if not code_alt2:
-                            return out_alt2
+                    # try endpoints and param variants
+                    for path in endpoint_paths:
+                        # try original, then symbol variants
+                        for payload in [data] + [
+                            {**params, **base, "symbol": alt} for alt in candidates
+                        ]:
+                            # normalize market type semantics
+                            tt = str(payload.get("type", "")).lower()
+                            payload = payload.copy()
+                            if tt in ("buy_market", "sell_market"):
+                                payload["type"] = "buy" if "buy" in tt else "sell"
+                                payload["price"] = "0"
+                            # try with symbol and pair key permutations
+                            for p in build_variants(str(payload.get("symbol") or payload.get("pair") or sym)):
+                                try:
+                                    out_variant = await _post_with(http_alt, p, path)
+                                except Exception:
+                                    continue
+                                code_v = (out_variant or {}).get("error_code")
+                                if not code_v:
+                                    return out_variant
                 finally:
                     await http_alt.close()
         return out
