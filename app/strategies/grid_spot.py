@@ -26,6 +26,7 @@ class GridConfig:
     total_budget_usdt: float = 2.8  # used when order_sizing = fixed_total_pct
     per_order_pct_of_total: float = 20.0  # percent of total budget per order
     min_notional_usdt: float = 0.0  # min notional for live; in signal mode ignored
+    order_kind: str = "market"  # "limit" | "market"
     cadence_sec: int = 300  # resend signal pack every N seconds even if no recenter
 
 
@@ -131,13 +132,16 @@ class GridSpotStrategy:
                 return
             sl = price * (1 - self.cfg.default_stop_loss_pct) if side == "buy" else price * (1 + self.cfg.default_stop_loss_pct)
             tp = price * (1 + self.cfg.default_take_profit_pct) if side == "buy" else price * (1 - self.cfg.default_take_profit_pct)
+            kind = self.cfg.order_kind
+            # For market orders, engine will set price=0; omit price in intent
+            intent_price = None if kind == "market" else price_str
             intents.append(
                 OrderIntent(
                     symbol=self.cfg.symbol,
                     side=side,
-                    type="limit",
+                    type=kind,
                     quantity=_format_decimal(amount),
-                    price=price_str,
+                    price=intent_price,
                     client_order_id=f"grid_{side}_{price_str}",
                     stop_loss=_format_decimal(sl),
                     take_profit=_format_decimal(tp),
