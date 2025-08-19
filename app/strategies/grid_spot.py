@@ -133,8 +133,8 @@ class GridSpotStrategy:
             sl = price * (1 - self.cfg.default_stop_loss_pct) if side == "buy" else price * (1 + self.cfg.default_stop_loss_pct)
             tp = price * (1 + self.cfg.default_take_profit_pct) if side == "buy" else price * (1 - self.cfg.default_take_profit_pct)
             kind = self.cfg.order_kind
-            # For market orders, engine will set price=0; omit price in intent
-            intent_price = None if kind == "market" else price_str
+            # For market orders, engine will set price=0; but include level price in signal payload for display
+            intent_price = price_str
             intents.append(
                 OrderIntent(
                     symbol=self.cfg.symbol,

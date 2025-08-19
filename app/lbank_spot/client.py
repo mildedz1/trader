@@ -54,8 +54,25 @@ class LBankSpotClient:
             sym = await self.normalize_symbol(symbol)
         except Exception:
             sym = symbol
-        resp = await self.http.get("v2/supplement/ticker/price.do", params={"symbol": sym})
-        return resp.json()
+        # Try multiple official endpoints to maximize compatibility across regions/versions
+        endpoints = [
+            ("v2/supplement/ticker/price.do", {"symbol": sym}),
+            ("v2/supplement/ticker/bookTicker.do", {"symbol": sym}),
+            ("v2/supplement/ticker/24hr.do", {"symbol": sym}),
+            ("v2/ticker/24hr.do", {"symbol": sym}),
+            ("v2/ticker.do", {"symbol": sym}),
+        ]
+        last_exc: Optional[Exception] = None
+        for path, params in endpoints:
+            try:
+                resp = await self.http.get(path, params=params)
+                return resp.json()
+            except Exception as exc:
+                last_exc = exc
+                continue
+        if last_exc:
+            raise last_exc
+        return {}
 
     async def ticker_24hr(self, symbol: str | None = None) -> Dict[str, Any]:
         params: Dict[str, Any] = {}

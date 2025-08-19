@@ -45,7 +45,7 @@ class StrategyEngine:
     def __init__(self, spot_client: Any | None = None, perp_client: Any | None = None, notifier: Optional[Callable[[str, Dict[str, Any]], Awaitable[None]]] = None) -> None:
         self.strategies: Dict[str, StrategyPlugin] = {}
         self.enabled: Dict[str, bool] = {}
-        self.mode: str = "paper"
+        self.mode: str = "signal"
         self._bg_task: asyncio.Task | None = None
         self._market_snapshot: Dict[str, Any] = {}
         self.spot_client = spot_client
@@ -265,6 +265,8 @@ class StrategyEngine:
                     "type": it.type,
                     "quantity": it.quantity,
                     "price": it.price,
+                    "stop_loss": it.stop_loss,
+                    "take_profit": it.take_profit,
                     "clientOrderId": it.client_order_id,
                 }
                 for it in intents

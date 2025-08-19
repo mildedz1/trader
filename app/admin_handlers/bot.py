@@ -98,6 +98,8 @@ async def run_bot(stop_event: asyncio.Event) -> None:
     state = AppState()
     await state.start()
 
+    admin_ids: Sequence[int] = [int(x) for x in settings.admin_telegram_user_ids.split(",") if x.strip()]
+
     async def notify(event: str, payload: dict) -> None:
         # send to all admins; format Persian messages with compact, tabular batches
         def fmt_qty(q):
@@ -108,7 +110,11 @@ async def run_bot(stop_event: asyncio.Event) -> None:
 
         def pct(a, b):
             try:
-                return (float(a) - float(b)) / float(b) * 100.0
+                fa = float(a)
+                fb = float(b)
+                if fb == 0:
+                    return None
+                return (fa - fb) / fb * 100.0
             except Exception:
                 return None
 
@@ -229,10 +235,9 @@ async def run_bot(stop_event: asyncio.Event) -> None:
                     pass
 
     engine = StrategyEngine(spot_client=state.spot_client, perp_client=state.perp_client, notifier=notify)
+    engine.mode = state.mode
     engine.load_plugins()
     await engine.start()
-
-    admin_ids: Sequence[int] = [int(x) for x in settings.admin_telegram_user_ids.split(",") if x.strip()]
 
     def is_admin(user_id: int | None) -> bool:
         return bool(user_id and user_id in admin_ids)
