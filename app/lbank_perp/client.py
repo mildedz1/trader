@@ -49,13 +49,16 @@ class LBankPerpClient:
     # Private examples (actual endpoints should follow LBank Contract API specs)
     async def _post_json(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         headers, signed = self.signer.build_headers_and_signature(payload)
+        # Contract API expects headers for timestamp/signature_method/echostr
         resp = await self.http.post(path, json=signed, headers=headers)
         return resp.json()
 
-    async def account_balance(self) -> Dict[str, Any]:
+    async def account_balance(self, asset: str = "USDT", product_group: str = "SwapU") -> Dict[str, Any]:
         base = await self._security_params()
+        base.update({"api_key": self.api_key, "productGroup": product_group, "asset": asset})
         # Try a list of documented/variant endpoints; return first non-error response
         candidates = [
+            "cfd/openApi/v1/prv/account",  # matches sample
             "cfd/openApi/v1/pri/account/balance",
             "cfd/openApi/v1/pri/account/getBalance",
             "cfd/openApi/v1/pri/account/info",
