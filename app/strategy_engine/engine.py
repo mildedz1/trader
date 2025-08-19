@@ -116,6 +116,8 @@ class StrategyEngine:
                 logger.error("strategy.startup.error", name=name, error=str(exc))
         # Tick loop
         while True:
+            # rebuild context each tick to reflect updated clients/mode
+            ctx = self._build_ctx()
             for name, plugin in list(self.strategies.items()):
                 if not self.enabled.get(name, False):
                     continue
