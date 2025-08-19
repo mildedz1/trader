@@ -23,11 +23,12 @@ class GridConfig:
     default_take_profit_pct: float = 0.02
     order_sizing: str = "static"  # "static" | "balance_pct" | "fixed_total_pct"
     balance_pct_per_order: float = 10.0  # percent of free quote per order if balance_pct
-    total_budget_usdt: float = 100.0  # used when order_sizing = fixed_total_pct
+    total_budget_usdt: float = 50.0  # used when order_sizing = fixed_total_pct
     per_order_pct_of_total: float = 20.0  # percent of total budget per order
-    min_notional_usdt: float = 5.0  # min notional for live; in signal mode ignored
+    min_notional_usdt: float = 0.0  # min notional for live; in signal mode ignored
     order_kind: str = "limit"  # "limit" | "market"
     cadence_sec: int = 300  # resend signal pack every N seconds even if no recenter
+    cap_buys_by_quote_balance: bool = True  # additionally cap buys by free quote share in live
 
 
 def _build_levels(center: float, cfg: GridConfig) -> Tuple[List[float], List[float], float, float]:
@@ -123,6 +124,10 @@ class GridSpotStrategy:
             if ctx.mode == "live":
                 if side == "sell" and free_base is not None and len(sells) > 0:
                     amt = min(amt, max(0.0, free_base / len(sells)))
+                if self.cfg.cap_buys_by_quote_balance and side == "buy" and free_quote is not None and len(buys) > 0:
+                    # Limit each buy by a fair share of free quote
+                    max_amt_by_quote = max(0.0, (free_quote / len(buys)) / price)
+                    amt = min(amt, max_amt_by_quote)
             return max(0.0, amt)
 
         def add_intent(side: str, price_str: str) -> None:
