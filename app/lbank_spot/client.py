@@ -20,6 +20,7 @@ class LBankSpotClient:
         self.time_sync = time_sync
         self.base_url = (base_url or SPOT_BASE_URLS[0]).rstrip("/") + "/"
         self.http = HttpClient(self.base_url, headers={"X-Api-Key": self.api_key})
+        self._pairs: set[str] = set()
 
     async def open(self) -> None:
         await self.http.open()
@@ -50,6 +51,28 @@ class LBankSpotClient:
         resp = await self.http.get("v2/supplement/ticker/price.do", params={"symbol": symbol.lower()})
         return resp.json()
 
+    async def currency_pairs(self) -> set[str]:
+        if self._pairs:
+            return self._pairs
+        resp = await self.http.get("v2/currencyPairs.do")
+        data = resp.json()
+        pairs: set[str] = set()
+        if isinstance(data, dict) and "data" in data:
+            for s in data["data"]:
+                pairs.add(str(s).lower())
+        elif isinstance(data, list):
+            for s in data:
+                pairs.add(str(s).lower())
+        self._pairs = pairs
+        return self._pairs
+
+    async def normalize_symbol(self, symbol: str) -> str:
+        pairs = await self.currency_pairs()
+        sl = symbol.lower().replace("/", "_")
+        if sl in pairs:
+            return sl
+        raise ValueError(f"Unsupported symbol on LBank spot: {symbol}")
+
     # Private
     async def create_order_test(self, params: Dict[str, str]) -> Dict[str, Any]:
         base = await self._security_params()
@@ -61,7 +84,8 @@ class LBankSpotClient:
     async def create_order(self, params: Dict[str, str]) -> Dict[str, Any]:
         base = await self._security_params()
         data = {**params, **base}
-        # Keep symbol as provided
+        if "symbol" in data:
+            data["symbol"] = await self.normalize_symbol(str(data["symbol"]))
         headers, signed = self.signer.build_headers_and_signature(data)
         resp = await self.http.post("v2/supplement/create_order.do", data=signed, headers=headers)
         return resp.json()
