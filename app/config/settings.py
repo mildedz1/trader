@@ -18,15 +18,9 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(alias="TELEGRAM_BOT_TOKEN")
 
     # MEXC spot
-    # OKX spot
-    okx_spot_api_key: str | None = Field(default=None, alias="OKX_SPOT_API_KEY")
-    okx_spot_secret_key: str | None = Field(default=None, alias="OKX_SPOT_SECRET_KEY")
-    okx_spot_passphrase: str | None = Field(default=None, alias="OKX_SPOT_PASSPHRASE")
-    okx_simulated_trading: bool = Field(default=False, alias="OKX_SIMULATED_TRADING")
-    # KuCoin sandbox
-    kucoin_spot_api_key: str | None = Field(default=None, alias="KUCOIN_SPOT_API_KEY")
-    kucoin_spot_secret_key: str | None = Field(default=None, alias="KUCOIN_SPOT_SECRET_KEY")
-    kucoin_spot_passphrase: str | None = Field(default=None, alias="KUCOIN_SPOT_PASSPHRASE")
+    # CoinEx
+    coinex_access_id: str | None = Field(default=None, alias="COINEX_ACCESS_ID")
+    coinex_secret_key: str | None = Field(default=None, alias="COINEX_SECRET_KEY")
 
     lbank_perp_api_key: str | None = Field(default=None, alias="LBANK_PERP_API_KEY")
     lbank_perp_secret_key: str | None = Field(default=None, alias="LBANK_PERP_SECRET_KEY")
@@ -45,8 +39,8 @@ class Settings(BaseSettings):
 
     def get_spot_keys(self) -> ApiKeyConfig:
         return ApiKeyConfig(
-            api_key=self.okx_spot_api_key,
-            secret_key=self.okx_spot_secret_key,
+            api_key=self.coinex_access_id,
+            secret_key=self.coinex_secret_key,
         )
 
     def get_perp_keys(self) -> ApiKeyConfig:
