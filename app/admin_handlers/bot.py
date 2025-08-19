@@ -15,6 +15,7 @@ from app.mexc_spot.time_source import fetch_spot_server_time_ms
 from app.lbank_perp.time_source import fetch_perp_server_time_ms
 from app.time_sync import TimeSynchronizer
 from app.mexc_spot import MexcSpotClient
+from app.mexc_spot.demo_client import MexcSpotDemoClient
 from app.lbank_perp import LBankPerpClient
 from app.strategy_engine.engine import StrategyEngine
 
@@ -22,6 +23,7 @@ from app.strategy_engine.engine import StrategyEngine
 class AppState:
     def __init__(self) -> None:
         self.mode: str = "signal"  # signal/live
+        self.demo: bool = False
         self.spot_time = TimeSynchronizer(fetch_server_ms=fetch_spot_server_time_ms)
         self.spot_client: MexcSpotClient | None = None
         self.perp_time = TimeSynchronizer(fetch_server_ms=fetch_perp_server_time_ms)
@@ -31,13 +33,17 @@ class AppState:
     async def start(self) -> None:
         await self.spot_time.refresh()
         await self.perp_time.refresh()
-        if settings.mexc_spot_api_key and settings.mexc_spot_secret_key:
-            self.spot_client = MexcSpotClient(
-                api_key=settings.mexc_spot_api_key,
-                secret_key=settings.mexc_spot_secret_key,
-                time_sync=self.spot_time,
-            )
+        if self.demo:
+            self.spot_client = MexcSpotDemoClient(initial_balances={"USDT": 250000.0})
             await self.spot_client.open()
+        else:
+            if settings.mexc_spot_api_key and settings.mexc_spot_secret_key:
+                self.spot_client = MexcSpotClient(
+                    api_key=settings.mexc_spot_api_key,
+                    secret_key=settings.mexc_spot_secret_key,
+                    time_sync=self.spot_time,
+                )
+                await self.spot_client.open()
         if settings.lbank_perp_api_key and settings.lbank_perp_secret_key:
             self.perp_client = LBankPerpClient(
                 api_key=settings.lbank_perp_api_key,
@@ -75,6 +81,7 @@ def admin_kb(state: AppState) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text=f"Mode: {state.mode}", callback_data="mode:menu")
     kb.button(text="Spot Balance", callback_data="spot:balance")
+    kb.button(text=("Demo: ON" if state.demo else "Demo: OFF"), callback_data="demo:toggle")
     kb.button(text="Perp Balance (LBank sample)", callback_data="perp:balance")
     kb.button(text="Strategies", callback_data="strat:menu")
     kb.button(text="Time Drift", callback_data="time:drift")
@@ -274,6 +281,32 @@ async def run_bot(stop_event: asyncio.Event) -> None:
         await cb.message.edit_text("Admin Dashboard", reply_markup=admin_kb(state).as_markup())
         await cb.answer()
 
+    @dp.callback_query(F.data == "demo:toggle")
+    async def cb_demo_toggle(cb: CallbackQuery) -> None:
+        state.demo = not state.demo
+        # restart spot client according to mode
+        try:
+            if state.spot_client:
+                await state.spot_client.close()  # type: ignore[func-returns-value]
+        except Exception:
+            pass
+        # re-init
+        if state.demo:
+            state.spot_client = MexcSpotDemoClient(initial_balances={"USDT": 500000.0})
+            await state.spot_client.open()
+        else:
+            if settings.mexc_spot_api_key and settings.mexc_spot_secret_key:
+                state.spot_client = MexcSpotClient(
+                    api_key=settings.mexc_spot_api_key,
+                    secret_key=settings.mexc_spot_secret_key,
+                    time_sync=state.spot_time,
+                )
+                await state.spot_client.open()
+            else:
+                state.spot_client = None
+        await cb.message.edit_text("Admin Dashboard", reply_markup=admin_kb(state).as_markup())
+        await cb.answer("Demo mode: %s" % ("ON" if state.demo else "OFF"))
+
     @dp.callback_query(F.data == "strat:menu")
     async def cb_strat_menu(cb: CallbackQuery) -> None:
         items = engine.list()
@@ -422,4 +455,3 @@ async def run_bot(stop_event: asyncio.Event) -> None:
             await state.stop()
 
     await _runner()
-
