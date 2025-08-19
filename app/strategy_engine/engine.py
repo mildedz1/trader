@@ -191,16 +191,36 @@ class StrategyEngine:
                 params["price"] = intent.price
             try:
                 resp = await self.spot_client.create_order(params)
-                if self.notifier is not None:
-                    await self.notifier("order_placed", {
-                        "strategy": strategy_name,
-                        "symbol": intent.symbol,
-                        "side": intent.side,
-                        "type": order_type,
-                        "quantity": intent.quantity,
-                        "price": intent.price,
-                        "resp": resp,
-                    })
+                ok = False
+                msg = None
+                code = None
+                if isinstance(resp, dict):
+                    ok = bool(resp.get("success") in (True, "true", "True") or resp.get("result") in (True, "true", "True"))
+                    msg = resp.get("msg") or resp.get("message")
+                    code = resp.get("error_code") or resp.get("code")
+                if ok:
+                    if self.notifier is not None:
+                        await self.notifier("order_placed", {
+                            "strategy": strategy_name,
+                            "symbol": intent.symbol,
+                            "side": intent.side,
+                            "type": order_type,
+                            "quantity": intent.quantity,
+                            "price": intent.price,
+                            "resp": resp,
+                        })
+                else:
+                    if self.notifier is not None:
+                        await self.notifier("order_error", {
+                            "strategy": strategy_name,
+                            "symbol": intent.symbol,
+                            "side": intent.side,
+                            "type": order_type,
+                            "quantity": intent.quantity,
+                            "price": intent.price,
+                            "error": f"{code} {msg}",
+                            "resp": resp,
+                        })
             except Exception as exc:
                 if self.notifier is not None:
                     await self.notifier("order_error", {

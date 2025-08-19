@@ -61,6 +61,9 @@ class LBankSpotClient:
     async def create_order(self, params: Dict[str, str]) -> Dict[str, Any]:
         base = await self._security_params()
         data = {**params, **base}
+        # Ensure symbol is lowercase per LBank V2
+        if "symbol" in data:
+            data["symbol"] = str(data["symbol"]).lower()
         headers, signed = self.signer.build_headers_and_signature(data)
         resp = await self.http.post("v2/supplement/create_order.do", data=signed, headers=headers)
         return resp.json()
